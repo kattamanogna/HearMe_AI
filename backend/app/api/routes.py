@@ -1,23 +1,14 @@
-"""API route declarations."""
+"""API routes for health checks and model inference endpoints."""
 
-import logging
+from fastapi import APIRouter, HTTPException, status
 
-from fastapi import APIRouter
-
-logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api", tags=["api"])
-
-
-@router.get("/health")
-async def health() -> dict[str, str]:
-    """Basic health check endpoint."""
-    logger.info("Health check requested")
-    return {"status": "ok"}
-"""API routes for health checks and multimodal prediction orchestration."""
-
-from fastapi import APIRouter
-
-from app.schemas import MultimodalRequest, MultimodalResponse
+from app.schemas import (
+    MultimodalRequest,
+    MultimodalResponse,
+    TextEmotionPredictRequest,
+    TextEmotionPredictResponse,
+)
+from app.services.text_emotion_model import predict_text_emotion
 
 router = APIRouter(prefix="/api/v1", tags=["inference"])
 
@@ -28,15 +19,25 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.post("/predict-text", response_model=TextEmotionPredictResponse)
+def predict_text(payload: TextEmotionPredictRequest) -> TextEmotionPredictResponse:
+    """Predict emotion and confidence score for the provided text."""
+    if not payload.text or not payload.text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'text' is required and cannot be empty.",
+        )
+
+    prediction = predict_text_emotion(payload.text.strip())
+    return TextEmotionPredictResponse(
+        emotion=prediction["emotion"],
+        confidence=prediction["confidence"],
+    )
+
+
 @router.post("/analyze", response_model=MultimodalResponse)
 def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
-    """Combine text, audio, and face features and return final emotion + intent.
-
-    Next steps:
-    1. Call the text, audio, and face inference modules.
-    2. Pass resulting features to the fusion engine.
-    3. Return confidence scores and a chatbot-safe response template.
-    """
+    """Combine text, audio, and face features and return final emotion + intent."""
     # TODO: Replace placeholder response with real model outputs.
     return MultimodalResponse(
         emotion="neutral",
