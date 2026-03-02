@@ -61,3 +61,7 @@ class MultimodalResponse(BaseModel):
     )
     fused_emotion: str = Field(..., description="Final fused emotion across available signals.")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Fusion confidence score.")
+    response_text: str = Field(
+        ...,
+        description="Supportive response generated from the fused emotion and text input.",
+    )
