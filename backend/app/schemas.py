@@ -68,7 +68,26 @@ class MultimodalResponse(BaseModel):
     chat_history: list[dict[str, str]] = Field(
         default_factory=list,
         description="Last N stored interactions for the provided session.",
+    )
     response_text: str = Field(
         ...,
         description="Supportive response generated from the fused emotion and text input.",
     )
+
+
+class ChatMessage(BaseModel):
+    """WebSocket chat input payload."""
+
+    session_id: str = Field(
+        default="default",
+        description="Session identifier used for in-memory conversation history.",
+    )
+    text: str = Field(..., description="User message text.")
+
+
+class ChatStreamChunk(BaseModel):
+    """Single streamed WebSocket response chunk."""
+
+    session_id: str = Field(..., description="Session identifier for this chat stream.")
+    chunk: str = Field(..., description="Incremental piece of assistant text.")
+    done: bool = Field(default=False, description="Whether this is the final chunk.")
