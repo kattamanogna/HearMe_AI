@@ -6,9 +6,11 @@ import base64
 import binascii
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status
 
 from app.schemas import (
+    ChatMessage,
+    ChatStreamChunk,
     ModalityPredictResponse,
     MultimodalRequest,
     MultimodalResponse,
@@ -39,6 +41,15 @@ def _decode_base64_payload(data: str, field_name: str) -> bytes:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"'{field_name}' must be valid base64-encoded bytes.",
         ) from exc
+
+
+def _stream_chunks(text: str, *, size: int = 24) -> list[str]:
+    """Split generated text into deterministic chunks for streaming."""
+
+    normalized = text.strip()
+    if not normalized:
+        return [""]
+    return [normalized[idx : idx + size] for idx in range(0, len(normalized), size)]
 
 
 @router.get("/health")
@@ -162,3 +173,57 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
         chat_history=[{str(key): str(value) for key, value in item.items()} for item in chat_history],
         response_text=response_text,
     )
+
+
+@router.websocket("/ws/chat")
+async def websocket_chat(websocket: WebSocket) -> None:
+    """Realtime chat endpoint that streams assistant responses over WebSocket."""
+
+    await websocket.accept()
+    try:
+        while True:
+            payload = ChatMessage.model_validate_json(await websocket.receive_text())
+            session_id = payload.session_id.strip() or "default"
+            text_value = payload.text.strip()
+            if not text_value:
+                error_chunk = ChatStreamChunk(
+                    session_id=session_id,
+                    chunk="'text' is required and cannot be empty.",
+                    done=True,
+                )
+                await websocket.send_json(error_chunk.model_dump())
+                continue
+
+            text_prediction = predict_text_emotion(text_value)
+            emotion = str(text_prediction.get("emotion", "neutral"))
+            response_text = generate_response(emotion, text_value)
+
+            store_interaction(
+                session_id,
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "route": "/api/v1/ws/chat",
+                    "text": text_value,
+                    "fused_emotion": emotion,
+                },
+            )
+
+            chunks = _stream_chunks(response_text)
+            for index, chunk in enumerate(chunks):
+                stream_chunk = ChatStreamChunk(
+                    session_id=session_id,
+                    chunk=chunk,
+                    done=index == len(chunks) - 1,
+                )
+                await websocket.send_json(stream_chunk.model_dump())
+    except WebSocketDisconnect:
+        return
+    except ValueError:
+        await websocket.send_json(
+            ChatStreamChunk(
+                session_id="default",
+                chunk="Invalid payload. Expected JSON with fields: session_id, text.",
+                done=True,
+            ).model_dump()
+        )
+        await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
