@@ -34,6 +34,10 @@ class MultimodalRequest(BaseModel):
         }
     """
 
+    session_id: str = Field(
+        default="default",
+        description="Session identifier used for in-memory conversation history.",
+    )
     text: str = Field(..., description="User message text.")
     audio_bytes: str | None = Field(
         default=None,
@@ -61,6 +65,9 @@ class MultimodalResponse(BaseModel):
     )
     fused_emotion: str = Field(..., description="Final fused emotion across available signals.")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Fusion confidence score.")
+    chat_history: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Last N stored interactions for the provided session.",
     response_text: str = Field(
         ...,
         description="Supportive response generated from the fused emotion and text input.",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
@@ -18,6 +19,7 @@ from app.services.audio_emotion_model import predict_audio_emotion
 from app.services.face_emotion_model import detect_face_and_predict
 from app.services.chat_response import generate_response
 from app.services.fusion_engine import combine_predictions
+from app.services.history import get_chat_history, store_interaction
 from app.services.text_emotion_model import predict_text_emotion
 
 router = APIRouter(prefix="/api/v1", tags=["inference"])
@@ -115,6 +117,7 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
     }
     """
 
+    session_id = payload.session_id.strip() or "default"
     text_value = payload.text.strip()
     if not text_value:
         raise HTTPException(
@@ -136,6 +139,14 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
 
     fused = combine_predictions(text_prediction, audio_prediction, face_prediction)
 
+    interaction = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "route": "/api/v1/analyze",
+        "text": text_value,
+        "fused_emotion": str(fused.get("emotion", "neutral")),
+    }
+    store_interaction(session_id, interaction)
+    chat_history = get_chat_history(session_id)
     response_text = generate_response(str(fused.get("emotion", "neutral")), text_value)
 
     return MultimodalResponse(
@@ -148,5 +159,6 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
         ),
         fused_emotion=str(fused.get("emotion", "neutral")),
         confidence=float(fused.get("confidence", 0.0)),
+        chat_history=[{str(key): str(value) for key, value in item.items()} for item in chat_history],
         response_text=response_text,
     )
