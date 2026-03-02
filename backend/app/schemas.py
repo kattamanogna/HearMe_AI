@@ -68,4 +68,7 @@ class MultimodalResponse(BaseModel):
     chat_history: list[dict[str, str]] = Field(
         default_factory=list,
         description="Last N stored interactions for the provided session.",
+    response_text: str = Field(
+        ...,
+        description="Supportive response generated from the fused emotion and text input.",
     )

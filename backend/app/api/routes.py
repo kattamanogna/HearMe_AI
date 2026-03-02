@@ -17,6 +17,7 @@ from app.schemas import (
 )
 from app.services.audio_emotion_model import predict_audio_emotion
 from app.services.face_emotion_model import detect_face_and_predict
+from app.services.chat_response import generate_response
 from app.services.fusion_engine import combine_predictions
 from app.services.history import get_chat_history, store_interaction
 from app.services.text_emotion_model import predict_text_emotion
@@ -146,6 +147,7 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
     }
     store_interaction(session_id, interaction)
     chat_history = get_chat_history(session_id)
+    response_text = generate_response(str(fused.get("emotion", "neutral")), text_value)
 
     return MultimodalResponse(
         text_emotion=str(text_prediction.get("emotion", "neutral")),
@@ -158,4 +160,5 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
         fused_emotion=str(fused.get("emotion", "neutral")),
         confidence=float(fused.get("confidence", 0.0)),
         chat_history=[{str(key): str(value) for key, value in item.items()} for item in chat_history],
+        response_text=response_text,
     )
