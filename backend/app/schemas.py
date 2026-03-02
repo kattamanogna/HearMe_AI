@@ -3,6 +3,19 @@
 from pydantic import BaseModel, Field
 
 
+class TextEmotionPredictRequest(BaseModel):
+    """Input payload for text emotion prediction."""
+
+    text: str = Field(..., description="Text content to analyze for emotion.")
+
+
+class TextEmotionPredictResponse(BaseModel):
+    """Emotion prediction result for text input."""
+
+    emotion: str = Field(..., description="Predicted emotion label.")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Prediction confidence.")
+
+
 class MultimodalRequest(BaseModel):
     """Incoming data used for multimodal analysis."""
 
