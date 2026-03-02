@@ -17,23 +17,40 @@ class TextEmotionPredictResponse(BaseModel):
 
 
 class MultimodalRequest(BaseModel):
-    """Incoming data used for multimodal analysis."""
+    """Unified multimodal request payload.
+
+    Example:
+        {
+          "text": "I feel anxious but trying to stay calm",
+          "audio_bytes": "<base64-encoded-audio-bytes>",
+          "face_base64": "<base64-encoded-image-bytes>"
+        }
+    """
 
     text: str = Field(..., description="User message text.")
-    audio_path: str | None = Field(
+    audio_bytes: str | None = Field(
         default=None,
-        description="Optional local/remote path to an audio clip.",
+        description="Optional base64-encoded audio bytes.",
+        examples=["UklGRiQAAABXQVZFZm10IBAAAAABAAEA..."],
     )
-    frame_path: str | None = Field(
+    face_base64: str | None = Field(
         default=None,
-        description="Optional local/remote path to a facial image frame.",
+        description="Optional base64-encoded image bytes (JPEG/PNG).",
+        examples=["/9j/4AAQSkZJRgABAQAAAQABAAD..."],
     )
 
 
 class MultimodalResponse(BaseModel):
-    """Predicted emotion and intent, ready for frontend consumption."""
+    """Unified multimodal emotion response."""
 
-    emotion: str
-    intent: str
-    confidence: float
-    response_text: str
+    text_emotion: str = Field(..., description="Emotion predicted from text model.")
+    audio_emotion: str | None = Field(
+        default=None,
+        description="Emotion predicted from audio model when audio is supplied.",
+    )
+    face_emotion: str | None = Field(
+        default=None,
+        description="Emotion predicted from face model when face image is supplied.",
+    )
+    fused_emotion: str = Field(..., description="Final fused emotion across available signals.")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Fusion confidence score.")
