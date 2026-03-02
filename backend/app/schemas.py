@@ -16,6 +16,13 @@ class TextEmotionPredictResponse(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0, description="Prediction confidence.")
 
 
+class ModalityPredictResponse(BaseModel):
+    """Emotion prediction result for a single non-text modality."""
+
+    emotion: str = Field(..., description="Predicted emotion label.")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Prediction confidence.")
+
+
 class MultimodalRequest(BaseModel):
     """Unified multimodal request payload.
 

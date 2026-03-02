@@ -5,9 +5,10 @@ from __future__ import annotations
 import base64
 import binascii
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from app.schemas import (
+    ModalityPredictResponse,
     MultimodalRequest,
     MultimodalResponse,
     TextEmotionPredictRequest,
@@ -56,6 +57,48 @@ def predict_text(payload: TextEmotionPredictRequest) -> TextEmotionPredictRespon
     return TextEmotionPredictResponse(
         emotion=prediction["emotion"],
         confidence=prediction["confidence"],
+    )
+
+
+@router.post("/predict-audio", response_model=ModalityPredictResponse)
+async def predict_audio(file: UploadFile = File(...)) -> ModalityPredictResponse:
+    """Predict emotion from an uploaded audio file (multipart/form-data)."""
+
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded audio file is empty.",
+        )
+
+    prediction = predict_audio_emotion(audio_bytes)
+    if prediction is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to process uploaded audio file.",
+        )
+
+    return ModalityPredictResponse(
+        emotion=str(prediction.get("emotion", "neutral")),
+        confidence=float(prediction.get("confidence", 0.0)),
+    )
+
+
+@router.post("/predict-face", response_model=ModalityPredictResponse)
+async def predict_face(file: UploadFile = File(...)) -> ModalityPredictResponse:
+    """Predict emotion from an uploaded face image file (multipart/form-data)."""
+
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded image file is empty.",
+        )
+
+    prediction = detect_face_and_predict(image_bytes)
+    return ModalityPredictResponse(
+        emotion=str(prediction.get("emotion", "neutral")),
+        confidence=float(prediction.get("confidence", 0.0)),
     )
 
 

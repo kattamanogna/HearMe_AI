@@ -88,6 +88,43 @@ Then test:
 curl http://127.0.0.1:8000/api/v1/health
 ```
 
+
+## API Examples
+
+### Text prediction
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/predict-text \
+  -H "Content-Type: application/json" \
+  -d '{"text":"I feel hopeful today"}'
+```
+
+### Audio prediction (file upload)
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/predict-audio \
+  -F "file=@/path/to/sample.wav"
+```
+
+### Face prediction (file upload)
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/predict-face \
+  -F "file=@/path/to/face.jpg"
+```
+
+### Multimodal analysis (base64 payloads)
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text":"I am stressed but hopeful",
+    "audio_bytes":"UklGRiQAAABXQVZFZm10IBAAAAABAAEA...",
+    "face_base64":"/9j/4AAQSkZJRgABAQAAAQABAAD..."
+  }'
+```
+
 ## Next Implementation Steps
 
 - Replace placeholder model logic in all `train.py` and `infer.py` modules.
