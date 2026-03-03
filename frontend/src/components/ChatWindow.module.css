@@ -6,4 +6,28 @@
   flex-direction: column;
   gap: 0.35rem;
   background: linear-gradient(180deg, #fffdf3 0%, #fff8db 100%);
+  scroll-behavior: smooth;
+}
+
+.typingIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #6a5724;
+  font-size: 0.95rem;
+}
+
+.spinner {
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 2px solid #f4df94;
+  border-top-color: #7b5ef5;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
