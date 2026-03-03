@@ -6,6 +6,8 @@ import os
 import re
 from functools import lru_cache
 
+from app.services.session_manager import get_last_template_index, set_last_template_index
+
 # Lightweight safety list to avoid echoing harmful language in generated replies.
 _BLOCKED_TERMS = {
     "kill",
@@ -17,37 +19,51 @@ _BLOCKED_TERMS = {
     "hate",
 }
 
+_CRISIS_PATTERNS = [
+    r"\bkill myself\b",
+    r"\bend my life\b",
+    r"\bsuicid(?:e|al)\b",
+    r"\bself[-\s]?harm\b",
+    r"\bhurt myself\b",
+    r"\bdon't want to live\b",
+]
+
+EMERGENCY_SUPPORT_MESSAGE = (
+    "I'm really glad you reached out. If you might hurt yourself or are in immediate danger, "
+    "please call emergency services right now. You can also contact the 988 Suicide & Crisis Lifeline "
+    "(US/Canada) by calling or texting 988. If you're elsewhere, please contact your local crisis hotline immediately."
+)
+
 _EMOTION_TEMPLATES: dict[str, list[str]] = {
     "happy": [
-        "I'm glad you're feeling upbeat. Keep building on what is working for you.",
-        "That positive energy matters—hold onto the moments that are helping you feel better.",
+        "It's great to hear this uplift in your mood—keep noticing what is helping.",
+        "That sounds like a meaningful positive moment. You're building good momentum.",
     ],
     "sad": [
-        "I'm sorry this feels heavy right now. You don't have to carry everything at once.",
-        "It sounds like you're going through a tough moment. Taking one small step can help.",
+        "I'm really sorry this feels so heavy. We can take this one small step at a time.",
+        "Thank you for sharing this. You deserve support, and we can focus on one gentle next step.",
     ],
     "angry": [
-        "It makes sense to feel frustrated. A short pause or deep breath can create space to respond calmly.",
-        "I hear the intensity in what you're sharing. Let's focus on one thing you can control next.",
+        "I hear how intense this feels. Let's pause and pick one calming action you can take right now.",
+        "Your frustration makes sense. A slow breath and short reset can help you respond from a steadier place.",
+    ],
+    "anxious": [
+        "That sounds really stressful. Try a grounding check: name 5 things you can see and 4 you can feel.",
+        "You're carrying a lot right now. Let's anchor in the present with one slow breath and one manageable task.",
     ],
     "fear": [
-        "That sounds overwhelming. Grounding yourself in the present can reduce some of the pressure.",
-        "Feeling anxious is hard. Try naming one immediate action that helps you feel safer.",
+        "That sounds really stressful. Try a grounding check: name 5 things you can see and 4 you can feel.",
+        "You're carrying a lot right now. Let's anchor in the present with one slow breath and one manageable task.",
     ],
     "neutral": [
-        "Thanks for sharing. I'm here to help you reflect on what you're experiencing.",
-        "I appreciate your message. We can work through this one step at a time.",
+        "Thanks for sharing. I'm here with you while we work through this.",
+        "I appreciate you checking in. Let's keep exploring what would help most right now.",
     ],
 }
 
 
 @lru_cache(maxsize=1)
 def _load_hf_generator():
-    """Load an optional HuggingFace text-generation pipeline.
-
-    Returns None when unavailable or disabled.
-    """
-
     if os.getenv("ENABLE_HF_CHAT_RESPONSE", "0") != "1":
         return None
 
@@ -60,9 +76,13 @@ def _load_hf_generator():
         return None
 
 
-def _sanitize_text(text: str) -> str:
-    """Mask blocked terms and normalize whitespace."""
 
+def warmup_response_generator() -> None:
+    """Warm optional response-generation model at startup."""
+
+    _load_hf_generator()
+
+def _sanitize_text(text: str) -> str:
     cleaned = text.strip()
     for term in _BLOCKED_TERMS:
         pattern = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
@@ -70,28 +90,51 @@ def _sanitize_text(text: str) -> str:
     return re.sub(r"\s+", " ", cleaned)
 
 
-def _template_response(emotion: str) -> str:
-    """Return a deterministic emotion-based template response."""
+def detect_crisis_language(text: str) -> bool:
+    candidate = text.strip().lower()
+    return any(re.search(pattern, candidate) for pattern in _CRISIS_PATTERNS)
 
-    normalized = emotion.strip().lower() if emotion else "neutral"
+
+def _normalized_emotion(emotion: str) -> str:
+    value = emotion.strip().lower() if emotion else "neutral"
+    if value == "fearful":
+        return "anxious"
+    return value
+
+
+def _template_response(session_id: str, emotion: str) -> str:
+    normalized = _normalized_emotion(emotion)
     templates = _EMOTION_TEMPLATES.get(normalized, _EMOTION_TEMPLATES["neutral"])
-    return templates[0]
+
+    previous_index = get_last_template_index(session_id, normalized)
+    if previous_index is None:
+        next_index = 0
+    else:
+        next_index = (previous_index + 1) % len(templates)
+
+    set_last_template_index(session_id, normalized, next_index)
+    return templates[next_index]
 
 
-def generate_response(emotion: str, text: str) -> str:
-    """Generate a safe, supportive response using emotion and user text.
-
-    The function always applies a language safety filter. If an optional
-    HuggingFace model is enabled, it is used to produce a short continuation
-    that is still post-processed by the same safety filter.
-    """
-
+def generate_response(session_id: str, emotion: str, text: str) -> dict[str, str | bool]:
     safe_text = _sanitize_text(text)
-    prefix = _template_response(emotion)
+
+    if detect_crisis_language(text):
+        return {
+            "response_text": EMERGENCY_SUPPORT_MESSAGE,
+            "crisis_detected": True,
+            "severity": "high",
+        }
+
+    prefix = _template_response(session_id, emotion)
 
     generator = _load_hf_generator()
     if generator is None:
-        return f"{prefix} You said: \"{safe_text}\""
+        return {
+            "response_text": f"{prefix} You said: \"{safe_text}\"",
+            "crisis_detected": False,
+            "severity": "low",
+        }
 
     prompt = (
         f"Emotion: {emotion}. User message: {safe_text}. "
@@ -104,4 +147,8 @@ def generate_response(emotion: str, text: str) -> str:
     except Exception:
         candidate = prefix
 
-    return _sanitize_text(candidate)
+    return {
+        "response_text": _sanitize_text(candidate),
+        "crisis_detected": False,
+        "severity": "low",
+    }
