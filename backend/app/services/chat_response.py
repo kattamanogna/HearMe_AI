@@ -62,6 +62,47 @@ _EMOTION_TEMPLATES: dict[str, list[str]] = {
 }
 
 
+def _build_supportive_follow_up(emotion: str) -> str:
+    normalized = _normalized_emotion(emotion)
+    follow_ups = {
+        "sad": "Would it help to share what feels hardest right now, so we can break it into one manageable step?",
+        "angry": "Would you like to name what triggered this, then choose one response you can control next?",
+        "anxious": "Would you like a 30-second grounding exercise together before we continue?",
+        "happy": "What do you think is helping most right now, so you can keep that support going?",
+        "neutral": "Would you like to tell me a little more about what your day has been like?",
+    }
+    return follow_ups.get(normalized, follow_ups["neutral"])
+
+
+def generate_mental_health_response(
+    emotion: str,
+    confidence: float | None = None,
+    conversation_history: str | None = None,
+) -> str:
+    """Create a concise, empathetic, safety-aware message for a detected emotion.
+
+    Args:
+        emotion: Emotion label (e.g., sad, anxious, angry).
+        confidence: Optional confidence score in [0, 1].
+        conversation_history: Optional serialized history; currently used as an
+            extensibility input for future prompt-grounded behavior.
+    """
+
+    del conversation_history  # Reserved for future context-aware tailoring.
+
+    normalized = _normalized_emotion(emotion)
+    templates = _EMOTION_TEMPLATES.get(normalized, _EMOTION_TEMPLATES["neutral"])
+    base = templates[0]
+
+    if normalized == "sad" and confidence is not None and confidence >= 0.8:
+        base = (
+            "I'm really sorry you're feeling this way. You don't have to carry this alone, "
+            "and we can move through this one small step at a time."
+        )
+
+    return f"{base} {_build_supportive_follow_up(normalized)}"
+
+
 @lru_cache(maxsize=1)
 def _load_hf_generator():
     if os.getenv("ENABLE_HF_CHAT_RESPONSE", "0") != "1":
@@ -130,8 +171,9 @@ def generate_response(session_id: str, emotion: str, text: str) -> dict[str, str
 
     generator = _load_hf_generator()
     if generator is None:
+        supportive = generate_mental_health_response(emotion)
         return {
-            "response_text": f"{prefix} You said: \"{safe_text}\"",
+            "response_text": supportive,
             "crisis_detected": False,
             "severity": "low",
         }
