@@ -1,0 +1,9 @@
+.chatWindow {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: linear-gradient(180deg, #fffdf3 0%, #fff8db 100%);
+}

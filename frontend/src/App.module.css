@@ -1,0 +1,26 @@
+.appShell {
+  min-height: 100vh;
+  background: linear-gradient(160deg, #ffe9a8 0%, #ffd568 100%);
+  padding: 1rem;
+  display: flex;
+}
+
+.chatContainer {
+  width: min(100%, 980px);
+  margin: 0 auto;
+  background: #fffef7;
+  border-radius: 22px;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 2rem);
+  box-shadow: 0 16px 36px rgba(79, 57, 0, 0.18);
+  overflow: hidden;
+}
+
+.chatHeader {
+  padding: 1rem 1.2rem;
+  font-weight: 700;
+  color: #5a4300;
+  border-bottom: 1px solid #f0e5b7;
+  background: #fff8dc;
+}

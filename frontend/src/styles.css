@@ -1,95 +1,15 @@
 :root {
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  color: #152238;
-  background: #f5f7fb;
 }
 
 * {
   box-sizing: border-box;
 }
 
-body {
+html,
+body,
+#root {
   margin: 0;
-}
-
-.app-shell {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 2rem 1rem 4rem;
-}
-
-.panel {
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(31, 41, 55, 0.08);
-  padding: 1rem;
-  margin: 1rem 0;
-}
-
-label {
-  display: block;
-  font-weight: 600;
-  margin: 0.75rem 0 0.3rem;
-}
-
-textarea,
-input[type='file'] {
   width: 100%;
-}
-
-textarea {
-  border-radius: 8px;
-  border: 1px solid #d2dae8;
-  padding: 0.7rem;
-}
-
-button {
-  margin-top: 1rem;
-  background: #3a69e1;
-  color: white;
-  border: 0;
-  border-radius: 8px;
-  padding: 0.65rem 1rem;
-  cursor: pointer;
-}
-
-button:disabled {
-  background: #a6b6e5;
-  cursor: not-allowed;
-}
-
-.secondary-button {
-  background: #4c5c7f;
-}
-
-.status {
-  background: #e8efff;
-  border-left: 4px solid #3a69e1;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-}
-
-.camera-section {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-.camera-feed,
-.face-preview {
-  width: 100%;
-  min-height: 180px;
-  border-radius: 8px;
-  background: #111827;
-  object-fit: cover;
-}
-
-.result-panel ul {
-  padding-left: 1rem;
-}
-
-.error {
-  color: #c62828;
-  font-weight: 600;
+  min-height: 100%;
 }
