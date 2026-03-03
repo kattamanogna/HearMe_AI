@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 
 from app.api.routes import router
+from app.services.audio_emotion import warmup_audio_model
+from app.services.face_emotion import warmup_face_model
+from app.services.text_emotion import warmup_text_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +34,14 @@ def create_app() -> FastAPI:
         logger.info("API call | ts=%s | method=%s | route=%s", timestamp, request.method, request.url.path)
         response = await call_next(request)
         return response
+
+    @app.on_event("startup")
+    async def warmup_models() -> None:
+        """Preload model caches for lower latency on first inference."""
+
+        warmup_text_model()
+        warmup_audio_model()
+        warmup_face_model()
 
     app.include_router(router)
     return app

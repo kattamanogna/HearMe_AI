@@ -17,12 +17,12 @@ from app.schemas import (
     TextEmotionPredictRequest,
     TextEmotionPredictResponse,
 )
-from app.services.audio_emotion_model import predict_audio_emotion
-from app.services.face_emotion_model import detect_face_and_predict
+from app.services.audio_emotion import analyze_audio_emotion_bytes
+from app.services.face_emotion import analyze_face_emotion_bytes
 from app.services.chat_response import generate_response
 from app.services.fusion_engine import combine_predictions
 from app.services.history import get_chat_history, store_interaction
-from app.services.text_emotion_model import predict_text_emotion
+from app.services.text_emotion import analyze_text_emotion
 
 router = APIRouter(prefix="/api/v1", tags=["inference"])
 
@@ -67,10 +67,11 @@ def predict_text(payload: TextEmotionPredictRequest) -> TextEmotionPredictRespon
             detail="'text' is required and cannot be empty.",
         )
 
-    prediction = predict_text_emotion(payload.text.strip())
+    prediction = analyze_text_emotion(payload.text.strip())
     return TextEmotionPredictResponse(
-        emotion=prediction["emotion"],
-        confidence=prediction["confidence"],
+        emotion=str(prediction.get("emotion", "neutral")),
+        confidence=float(prediction.get("confidence", 0.0)),
+        probabilities={str(k): float(v) for k, v in dict(prediction.get("probabilities", {})).items()},
     )
 
 
@@ -85,7 +86,7 @@ async def predict_audio(file: UploadFile = File(...)) -> ModalityPredictResponse
             detail="Uploaded audio file is empty.",
         )
 
-    prediction = predict_audio_emotion(audio_bytes)
+    prediction = analyze_audio_emotion_bytes(audio_bytes)
     if prediction is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -95,6 +96,8 @@ async def predict_audio(file: UploadFile = File(...)) -> ModalityPredictResponse
     return ModalityPredictResponse(
         emotion=str(prediction.get("emotion", "neutral")),
         confidence=float(prediction.get("confidence", 0.0)),
+        probabilities={str(k): float(v) for k, v in dict(prediction.get("probabilities", {})).items()},
+        face_detected=prediction.get("face_detected"),
     )
 
 
@@ -109,10 +112,12 @@ async def predict_face(file: UploadFile = File(...)) -> ModalityPredictResponse:
             detail="Uploaded image file is empty.",
         )
 
-    prediction = detect_face_and_predict(image_bytes)
+    prediction = analyze_face_emotion_bytes(image_bytes)
     return ModalityPredictResponse(
         emotion=str(prediction.get("emotion", "neutral")),
         confidence=float(prediction.get("confidence", 0.0)),
+        probabilities={str(k): float(v) for k, v in dict(prediction.get("probabilities", {})).items()},
+        face_detected=bool(prediction.get("face_detected", False)),
     )
 
 
@@ -136,17 +141,17 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
             detail="'text' is required and cannot be empty.",
         )
 
-    text_prediction = predict_text_emotion(text_value)
+    text_prediction = analyze_text_emotion(text_value)
 
     audio_prediction = None
     if payload.audio_bytes:
         audio_bytes = _decode_base64_payload(payload.audio_bytes, "audio_bytes")
-        audio_prediction = predict_audio_emotion(audio_bytes)
+        audio_prediction = analyze_audio_emotion_bytes(audio_bytes)
 
     face_prediction = None
     if payload.face_base64:
         image_bytes = _decode_base64_payload(payload.face_base64, "face_base64")
-        face_prediction = detect_face_and_predict(image_bytes)
+        face_prediction = analyze_face_emotion_bytes(image_bytes)
 
     fused = combine_predictions(text_prediction, audio_prediction, face_prediction)
 
@@ -162,14 +167,17 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
 
     return MultimodalResponse(
         text_emotion=str(text_prediction.get("emotion", "neutral")),
-        audio_emotion=(
-            str(audio_prediction.get("emotion", "neutral")) if audio_prediction else None
-        ),
-        face_emotion=(
-            str(face_prediction.get("emotion", "neutral")) if face_prediction else None
-        ),
+        text_confidence=float(text_prediction.get("confidence", 0.0)),
+        text_probabilities={str(k): float(v) for k, v in dict(text_prediction.get("probabilities", {})).items()},
+        audio_emotion=(str(audio_prediction.get("emotion", "neutral")) if audio_prediction else None),
+        audio_confidence=(float(audio_prediction.get("confidence", 0.0)) if audio_prediction else None),
+        audio_probabilities=({str(k): float(v) for k, v in dict(audio_prediction.get("probabilities", {})).items()} if audio_prediction else None),
+        face_emotion=(str(face_prediction.get("emotion", "neutral")) if face_prediction else None),
+        face_confidence=(float(face_prediction.get("confidence", 0.0)) if face_prediction else None),
+        face_probabilities=({str(k): float(v) for k, v in dict(face_prediction.get("probabilities", {})).items()} if face_prediction else None),
         fused_emotion=str(fused.get("emotion", "neutral")),
-        confidence=float(fused.get("confidence", 0.0)),
+        fused_confidence=float(fused.get("confidence", 0.0)),
+        fused_probabilities={str(k): float(v) for k, v in dict(fused.get("probabilities", {})).items()},
         chat_history=[{str(key): str(value) for key, value in item.items()} for item in chat_history],
         response_text=response_text,
     )
@@ -194,7 +202,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json(error_chunk.model_dump())
                 continue
 
-            text_prediction = predict_text_emotion(text_value)
+            text_prediction = analyze_text_emotion(text_value)
             emotion = str(text_prediction.get("emotion", "neutral"))
             response_text = generate_response(emotion, text_value)
 
