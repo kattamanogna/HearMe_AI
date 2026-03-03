@@ -22,7 +22,7 @@ from app.services.audio_emotion import analyze_audio_emotion_bytes
 from app.services.face_emotion import analyze_face_emotion_bytes
 from app.services.chat_response import generate_response
 from app.services.fusion_engine import combine_predictions
-from app.services.session_manager import get_chat_history, get_session_summary, store_interaction
+from app.services.session_manager import get_session_summary, store_interaction
 from app.services.text_emotion import analyze_text_emotion
 
 router = APIRouter(prefix="/api/v1", tags=["inference"])
@@ -147,26 +147,37 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
         timestamp=timestamp,
     )
 
-    chat_history = get_chat_history(session_id)
     generated = generate_response(session_id, str(fused.get("emotion", "neutral")), text_value)
 
+    _neutral = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 0.0}}
+    text_breakdown = {
+        "emotion": str(text_prediction.get("emotion", "neutral")),
+        "confidence": float(text_prediction.get("confidence", 0.0)),
+        "probabilities": {str(k): float(v) for k, v in dict(text_prediction.get("probabilities", {})).items()},
+    }
+    face_source = face_prediction or _neutral
+    audio_source = audio_prediction or _neutral
+    face_breakdown = {
+        "emotion": str(face_source.get("emotion", "neutral")),
+        "confidence": float(face_source.get("confidence", 0.0)),
+        "probabilities": {str(k): float(v) for k, v in dict(face_source.get("probabilities", {})).items()},
+        "face_detected": bool(face_source.get("face_detected", False)),
+    }
+    audio_breakdown = {
+        "emotion": str(audio_source.get("emotion", "neutral")),
+        "confidence": float(audio_source.get("confidence", 0.0)),
+        "probabilities": {str(k): float(v) for k, v in dict(audio_source.get("probabilities", {})).items()},
+    }
+
     return MultimodalResponse(
-        text_emotion=str(text_prediction.get("emotion", "neutral")),
-        text_confidence=float(text_prediction.get("confidence", 0.0)),
-        text_probabilities={str(k): float(v) for k, v in dict(text_prediction.get("probabilities", {})).items()},
-        audio_emotion=(str(audio_prediction.get("emotion", "neutral")) if audio_prediction else None),
-        audio_confidence=(float(audio_prediction.get("confidence", 0.0)) if audio_prediction else None),
-        audio_probabilities=({str(k): float(v) for k, v in dict(audio_prediction.get("probabilities", {})).items()} if audio_prediction else None),
-        face_emotion=(str(face_prediction.get("emotion", "neutral")) if face_prediction else None),
-        face_confidence=(float(face_prediction.get("confidence", 0.0)) if face_prediction else None),
-        face_probabilities=({str(k): float(v) for k, v in dict(face_prediction.get("probabilities", {})).items()} if face_prediction else None),
-        fused_emotion=str(fused.get("emotion", "neutral")),
-        fused_confidence=float(fused.get("confidence", 0.0)),
-        fused_probabilities={str(k): float(v) for k, v in dict(fused.get("probabilities", {})).items()},
-        chat_history=[{str(key): str(value) for key, value in item.items()} for item in chat_history],
+        emotion=str(fused.get("emotion", "neutral")),
+        confidence=float(fused.get("confidence", 0.0)),
         response_text=str(generated["response_text"]),
-        crisis_detected=bool(generated["crisis_detected"]),
-        severity=str(generated["severity"]),
+        modality_breakdown={
+            "text": text_breakdown,
+            "face": face_breakdown,
+            "audio": audio_breakdown,
+        },
     )
 
 

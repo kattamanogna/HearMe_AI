@@ -10,14 +10,19 @@ WEIGHTS = {"text": 0.5, "face": 0.3, "audio": 0.2}
 def _norm_probs(prediction: dict[str, Any] | None) -> dict[str, float]:
     if not prediction:
         return {}
+
+    confidence = max(0.0, min(float(prediction.get("confidence", 0.0)), 1.0))
+    if confidence <= 0.0:
+        return {}
+
     probs = prediction.get("probabilities")
     if isinstance(probs, dict) and probs:
         normalized = {str(k).lower(): max(0.0, float(v)) for k, v in probs.items()}
         total = sum(normalized.values())
         if total > 0:
             return {k: v / total for k, v in normalized.items()}
+
     emotion = str(prediction.get("emotion", "neutral")).lower()
-    confidence = max(0.0, min(float(prediction.get("confidence", 0.0)), 1.0))
     return {emotion: confidence}
 
 
@@ -26,29 +31,36 @@ def combine_predictions(
     audio_pred: dict[str, Any] | None,
     face_pred: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    predictions = {"text": text_pred, "audio": audio_pred, "face": face_pred}
+    predictions = {"text": text_pred, "face": face_pred, "audio": audio_pred}
 
-    fused_scores: dict[str, float] = {}
-    effective_weight = 0.0
-
+    active_modalities: dict[str, dict[str, float]] = {}
     for modality, pred in predictions.items():
         probs = _norm_probs(pred)
-        if not probs:
-            continue
-        weight = WEIGHTS[modality]
-        effective_weight += weight
+        if probs:
+            active_modalities[modality] = probs
+
+    if not active_modalities:
+        return {
+            "emotion": "neutral",
+            "confidence": 0.0,
+            "probabilities": {"neutral": 0.0},
+        }
+
+    total_weight = sum(WEIGHTS[m] for m in active_modalities)
+    fused_scores: dict[str, float] = {}
+
+    for modality, probs in active_modalities.items():
+        normalized_weight = WEIGHTS[modality] / total_weight
         for emotion, prob in probs.items():
-            fused_scores[emotion] = fused_scores.get(emotion, 0.0) + (weight * prob)
+            fused_scores[emotion] = fused_scores.get(emotion, 0.0) + (normalized_weight * prob)
 
-    if not fused_scores or effective_weight == 0:
-        return {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 1.0}}
+    fused_emotion = max(fused_scores, key=fused_scores.get)
+    fused_confidence = float(fused_scores[fused_emotion])
 
-    renormalized = {emotion: score / effective_weight for emotion, score in fused_scores.items()}
-    fused_emotion, fused_confidence = max(renormalized.items(), key=lambda kv: kv[1])
     return {
         "emotion": fused_emotion,
-        "confidence": round(float(fused_confidence), 4),
-        "probabilities": {k: round(float(v), 6) for k, v in sorted(renormalized.items())},
+        "confidence": round(fused_confidence, 4),
+        "probabilities": {k: round(float(v), 6) for k, v in sorted(fused_scores.items())},
     }
 
 
