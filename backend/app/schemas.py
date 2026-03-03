@@ -60,6 +60,15 @@ class MultimodalResponse(BaseModel):
     fused_probabilities: dict[str, float] = Field(default_factory=dict)
     chat_history: list[dict[str, str]] = Field(default_factory=list)
     response_text: str = Field(...)
+    crisis_detected: bool = Field(default=False)
+    severity: str = Field(default="low")
+
+
+class SessionSummaryResponse(BaseModel):
+    emotional_trend: str = Field(...)
+    dominant_emotion: str = Field(...)
+    average_confidence: float = Field(..., ge=0.0, le=1.0)
+    recent_emotions: list[str] = Field(default_factory=list)
 
 
 class ChatMessage(BaseModel):

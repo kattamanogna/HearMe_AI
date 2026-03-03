@@ -11,6 +11,7 @@ from app.api.routes import router
 from app.services.audio_emotion import warmup_audio_model
 from app.services.face_emotion import warmup_face_model
 from app.services.text_emotion import warmup_text_model
+from app.services.chat_response import warmup_response_generator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
         warmup_text_model()
         warmup_audio_model()
         warmup_face_model()
+        warmup_response_generator()
 
     app.include_router(router)
     return app

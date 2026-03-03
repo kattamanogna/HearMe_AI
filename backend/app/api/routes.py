@@ -6,7 +6,7 @@ import base64
 import binascii
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect, status
 
 from app.schemas import (
     ChatMessage,
@@ -14,6 +14,7 @@ from app.schemas import (
     ModalityPredictResponse,
     MultimodalRequest,
     MultimodalResponse,
+    SessionSummaryResponse,
     TextEmotionPredictRequest,
     TextEmotionPredictResponse,
 )
@@ -21,19 +22,13 @@ from app.services.audio_emotion import analyze_audio_emotion_bytes
 from app.services.face_emotion import analyze_face_emotion_bytes
 from app.services.chat_response import generate_response
 from app.services.fusion_engine import combine_predictions
-from app.services.history import get_chat_history, store_interaction
+from app.services.session_manager import get_chat_history, get_session_summary, store_interaction
 from app.services.text_emotion import analyze_text_emotion
 
 router = APIRouter(prefix="/api/v1", tags=["inference"])
 
 
 def _decode_base64_payload(data: str, field_name: str) -> bytes:
-    """Decode an optional base64 payload into bytes.
-
-    Raises:
-        HTTPException: If the payload is not valid base64-encoded content.
-    """
-
     try:
         return base64.b64decode(data, validate=True)
     except (ValueError, binascii.Error) as exc:
@@ -44,8 +39,6 @@ def _decode_base64_payload(data: str, field_name: str) -> bytes:
 
 
 def _stream_chunks(text: str, *, size: int = 24) -> list[str]:
-    """Split generated text into deterministic chunks for streaming."""
-
     normalized = text.strip()
     if not normalized:
         return [""]
@@ -54,13 +47,16 @@ def _stream_chunks(text: str, *, size: int = 24) -> list[str]:
 
 @router.get("/health")
 def health_check() -> dict[str, str]:
-    """Simple health endpoint for uptime monitoring."""
     return {"status": "ok"}
+
+
+@router.get("/session-summary", response_model=SessionSummaryResponse)
+def session_summary(session_id: str = Query(default="default")) -> SessionSummaryResponse:
+    return SessionSummaryResponse.model_validate(get_session_summary(session_id))
 
 
 @router.post("/predict-text", response_model=TextEmotionPredictResponse)
 def predict_text(payload: TextEmotionPredictRequest) -> TextEmotionPredictResponse:
-    """Predict emotion and confidence score for the provided text."""
     if not payload.text or not payload.text.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -77,8 +73,6 @@ def predict_text(payload: TextEmotionPredictRequest) -> TextEmotionPredictRespon
 
 @router.post("/predict-audio", response_model=ModalityPredictResponse)
 async def predict_audio(file: UploadFile = File(...)) -> ModalityPredictResponse:
-    """Predict emotion from an uploaded audio file (multipart/form-data)."""
-
     audio_bytes = await file.read()
     if not audio_bytes:
         raise HTTPException(
@@ -103,8 +97,6 @@ async def predict_audio(file: UploadFile = File(...)) -> ModalityPredictResponse
 
 @router.post("/predict-face", response_model=ModalityPredictResponse)
 async def predict_face(file: UploadFile = File(...)) -> ModalityPredictResponse:
-    """Predict emotion from an uploaded face image file (multipart/form-data)."""
-
     image_bytes = await file.read()
     if not image_bytes:
         raise HTTPException(
@@ -123,16 +115,6 @@ async def predict_face(file: UploadFile = File(...)) -> ModalityPredictResponse:
 
 @router.post("/analyze", response_model=MultimodalResponse)
 def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
-    """Run multimodal emotion inference and return unified response.
-
-    Example request body:
-    {
-      "text": "I am stressed but hopeful",
-      "audio_bytes": "UklGRiQAAABXQVZFZm10IBAAAAABAAEA...",
-      "face_base64": "/9j/4AAQSkZJRgABAQAAAQABAAD..."
-    }
-    """
-
     session_id = payload.session_id.strip() or "default"
     text_value = payload.text.strip()
     if not text_value:
@@ -155,15 +137,18 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
 
     fused = combine_predictions(text_prediction, audio_prediction, face_prediction)
 
-    interaction = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "route": "/api/v1/analyze",
-        "text": text_value,
-        "fused_emotion": str(fused.get("emotion", "neutral")),
-    }
-    store_interaction(session_id, interaction)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    store_interaction(
+        session_id,
+        user_text=text_value,
+        emotion=str(fused.get("emotion", "neutral")),
+        confidence=float(fused.get("confidence", 0.0)),
+        route="/api/v1/analyze",
+        timestamp=timestamp,
+    )
+
     chat_history = get_chat_history(session_id)
-    response_text = generate_response(str(fused.get("emotion", "neutral")), text_value)
+    generated = generate_response(session_id, str(fused.get("emotion", "neutral")), text_value)
 
     return MultimodalResponse(
         text_emotion=str(text_prediction.get("emotion", "neutral")),
@@ -179,14 +164,14 @@ def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
         fused_confidence=float(fused.get("confidence", 0.0)),
         fused_probabilities={str(k): float(v) for k, v in dict(fused.get("probabilities", {})).items()},
         chat_history=[{str(key): str(value) for key, value in item.items()} for item in chat_history],
-        response_text=response_text,
+        response_text=str(generated["response_text"]),
+        crisis_detected=bool(generated["crisis_detected"]),
+        severity=str(generated["severity"]),
     )
 
 
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket) -> None:
-    """Realtime chat endpoint that streams assistant responses over WebSocket."""
-
     await websocket.accept()
     try:
         while True:
@@ -204,19 +189,19 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
             text_prediction = analyze_text_emotion(text_value)
             emotion = str(text_prediction.get("emotion", "neutral"))
-            response_text = generate_response(emotion, text_value)
 
+            timestamp = datetime.now(timezone.utc).isoformat()
             store_interaction(
                 session_id,
-                {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "route": "/api/v1/ws/chat",
-                    "text": text_value,
-                    "fused_emotion": emotion,
-                },
+                user_text=text_value,
+                emotion=emotion,
+                confidence=float(text_prediction.get("confidence", 0.0)),
+                route="/api/v1/ws/chat",
+                timestamp=timestamp,
             )
 
-            chunks = _stream_chunks(response_text)
+            generated = generate_response(session_id, emotion, text_value)
+            chunks = _stream_chunks(str(generated["response_text"]))
             for index, chunk in enumerate(chunks):
                 stream_chunk = ChatStreamChunk(
                     session_id=session_id,
