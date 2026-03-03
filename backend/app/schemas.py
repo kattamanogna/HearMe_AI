@@ -46,22 +46,10 @@ class MultimodalRequest(BaseModel):
 
 
 class MultimodalResponse(BaseModel):
-    text_emotion: str = Field(..., description="Emotion predicted from text model.")
-    text_confidence: float = Field(..., ge=0.0, le=1.0)
-    text_probabilities: dict[str, float] = Field(default_factory=dict)
-    audio_emotion: str | None = Field(default=None)
-    audio_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    audio_probabilities: dict[str, float] | None = Field(default=None)
-    face_emotion: str | None = Field(default=None)
-    face_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    face_probabilities: dict[str, float] | None = Field(default=None)
-    fused_emotion: str = Field(..., description="Final fused emotion across available signals.")
-    fused_confidence: float = Field(..., ge=0.0, le=1.0, description="Fusion confidence score.")
-    fused_probabilities: dict[str, float] = Field(default_factory=dict)
-    chat_history: list[dict[str, str]] = Field(default_factory=list)
+    emotion: str = Field(..., description="Final fused emotion across available signals.")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Fusion confidence score.")
     response_text: str = Field(...)
-    crisis_detected: bool = Field(default=False)
-    severity: str = Field(default="low")
+    modality_breakdown: dict[str, dict[str, float | str | bool | dict[str, float]]] = Field(default_factory=dict)
 
 
 class SessionSummaryResponse(BaseModel):

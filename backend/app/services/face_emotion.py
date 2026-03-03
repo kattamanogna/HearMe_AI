@@ -1,72 +1,80 @@
-"""Face emotion analysis using DeepFace with detection validation."""
+"""Face emotion analysis with safe DeepFace handling and explicit fallbacks."""
 
 from __future__ import annotations
 
-from functools import lru_cache
 import logging
 from typing import Any
 
-import cv2
 import numpy as np
+
+try:
+    import cv2
+except Exception as exc:  # pragma: no cover - dependency/runtime dependent.
+    cv2 = None  # type: ignore[assignment]
+    logger = logging.getLogger(__name__)
+    logger.warning("OpenCV dependency unavailable, face model decode disabled: %s", exc)
+
 
 logger = logging.getLogger(__name__)
 
-
-@lru_cache(maxsize=1)
-def _deepface() -> Any:
+try:
     from deepface import DeepFace  # type: ignore
-
-    return DeepFace
+except Exception as exc:  # pragma: no cover - dependency/runtime dependent.
+    DeepFace = None  # type: ignore[assignment]
+    logger.warning("DeepFace dependency unavailable, face model disabled: %s", exc)
 
 
 def warmup_face_model() -> None:
     """Warm face-analysis stack at startup."""
 
-    try:
-        _deepface()
-    except Exception as exc:  # pragma: no cover
-        logger.warning("Face emotion model warmup failed: %s", exc)
+    if DeepFace is None:
+        logger.warning("Skipping face model warmup because DeepFace is not installed.")
+
+
+def _neutral_face_response(*, face_detected: bool = False) -> dict[str, Any]:
+    return {
+        "emotion": "neutral",
+        "confidence": 0.0,
+        "probabilities": {"neutral": 0.0},
+        "face_detected": face_detected,
+    }
 
 
 def _decode_image(frame_source: str) -> np.ndarray | None:
+    if cv2 is None:
+        logger.warning("Face inference skipped: OpenCV is unavailable.")
+        return None
     image = cv2.imread(frame_source)
     if image is None:
-        return None
+        logger.warning("Face inference skipped: image path could not be decoded: %s", frame_source)
     return image
 
 
-def analyze_face_emotion(frame_source: str) -> dict[str, Any]:
-    """Analyze emotion from image path with face detection validation first."""
-
-    image = _decode_image(frame_source)
+def _analyze_face_image(image: np.ndarray | None) -> dict[str, Any]:
     if image is None:
-        return {
-            "modality": "face",
-            "input": frame_source,
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
-            "face_detected": False,
-        }
+        logger.warning("Face inference skipped: image is None.")
+        return _neutral_face_response(face_detected=False)
 
-    deepface = _deepface()
+    if DeepFace is None:
+        logger.warning("Face inference fallback: DeepFace dependency is missing.")
+        return _neutral_face_response(face_detected=False)
+
     try:
-        faces = deepface.extract_faces(img_path=image, detector_backend="opencv", enforce_detection=False)
-    except Exception:
-        faces = []
+        faces = DeepFace.extract_faces(
+            img_path=image,
+            detector_backend="opencv",
+            enforce_detection=False,
+        )
+    except Exception as exc:
+        logger.warning("DeepFace face-detection error: %s", exc)
+        return _neutral_face_response(face_detected=False)
 
     if not faces:
-        return {
-            "modality": "face",
-            "input": frame_source,
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
-            "face_detected": False,
-        }
+        logger.warning("No face detected in provided image.")
+        return _neutral_face_response(face_detected=False)
 
     try:
-        result = deepface.analyze(
+        result = DeepFace.analyze(
             img_path=image,
             actions=["emotion"],
             detector_backend="opencv",
@@ -74,25 +82,24 @@ def analyze_face_emotion(frame_source: str) -> dict[str, Any]:
             silent=True,
         )
     except Exception as exc:
-        logger.warning("DeepFace inference failed: %s", exc)
-        return {
-            "modality": "face",
-            "input": frame_source,
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
-            "face_detected": True,
-        }
+        logger.warning("DeepFace emotion inference failed: %s", exc)
+        return _neutral_face_response(face_detected=True)
 
     payload = result[0] if isinstance(result, list) else result
     probs_raw = payload.get("emotion", {})
-    probabilities = {str(k).lower(): float(v) / 100.0 for k, v in probs_raw.items()}
+    probabilities = {
+        str(label).lower(): float(score) / 100.0
+        for label, score in probs_raw.items()
+    }
+
+    if not probabilities:
+        logger.warning("DeepFace returned empty emotion scores.")
+        return _neutral_face_response(face_detected=True)
+
     dominant = str(payload.get("dominant_emotion", "neutral")).lower()
-    confidence = probabilities.get(dominant, 0.0)
+    confidence = float(probabilities.get(dominant, 0.0))
 
     return {
-        "modality": "face",
-        "input": frame_source,
         "emotion": dominant,
         "confidence": confidence,
         "probabilities": probabilities,
@@ -100,62 +107,29 @@ def analyze_face_emotion(frame_source: str) -> dict[str, Any]:
     }
 
 
+def analyze_face_emotion(frame_source: str) -> dict[str, Any]:
+    """Analyze emotion from image path with robust safety handling."""
+
+    image = _decode_image(frame_source)
+    result = _analyze_face_image(image)
+    return {
+        "modality": "face",
+        "input": frame_source,
+        **result,
+    }
+
+
 def analyze_face_emotion_bytes(image_bytes: bytes) -> dict[str, Any]:
-    """Variant for API usage from uploaded image bytes."""
+    """Analyze emotion from uploaded image bytes for API usage."""
 
     if not image_bytes:
-        return {
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
-            "face_detected": False,
-        }
+        logger.warning("Face inference skipped: empty image payload.")
+        return _neutral_face_response(face_detected=False)
+
+    if cv2 is None:
+        logger.warning("Face inference skipped: OpenCV is unavailable.")
+        return _neutral_face_response(face_detected=False)
 
     image_buffer = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(image_buffer, cv2.IMREAD_COLOR)
-    if image is None:
-        return {
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
-            "face_detected": False,
-        }
-
-    deepface = _deepface()
-    try:
-        faces = deepface.extract_faces(img_path=image, detector_backend="opencv", enforce_detection=False)
-    except Exception:
-        faces = []
-    if not faces:
-        return {
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
-            "face_detected": False,
-        }
-
-    try:
-        result = deepface.analyze(
-            img_path=image,
-            actions=["emotion"],
-            detector_backend="opencv",
-            enforce_detection=True,
-            silent=True,
-        )
-        payload = result[0] if isinstance(result, list) else result
-        probs_raw = payload.get("emotion", {})
-        probabilities = {str(k).lower(): float(v) / 100.0 for k, v in probs_raw.items()}
-        dominant = str(payload.get("dominant_emotion", "neutral")).lower()
-        return {
-            "emotion": dominant,
-            "confidence": probabilities.get(dominant, 0.0),
-            "probabilities": probabilities,
-            "face_detected": True,
-        }
-    except Exception:
-        return {
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
-            "face_detected": True,
-        }
+    return _analyze_face_image(image)

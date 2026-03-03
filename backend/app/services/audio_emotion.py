@@ -43,28 +43,38 @@ class SERNet(nn.Module):
         return self.classifier(feats.flatten(start_dim=1))
 
 
+def _neutral_audio_response() -> dict[str, Any]:
+    return {
+        "emotion": "neutral",
+        "confidence": 0.0,
+        "probabilities": {"neutral": 0.0},
+    }
+
+
 @lru_cache(maxsize=1)
-def _load_ser_model() -> nn.Module:
-    """Load and cache pretrained SER model weights."""
+def _load_ser_model() -> nn.Module | None:
+    """Load and cache pretrained SER model weights if available."""
+
+    if not WEIGHTS_PATH.exists():
+        logger.warning("SER weight file missing at %s; using neutral fallback.", WEIGHTS_PATH)
+        return None
 
     model = SERNet(n_classes=len(EMOTION_LABELS))
-    if WEIGHTS_PATH.exists():
+    try:
         state = torch.load(WEIGHTS_PATH, map_location="cpu")
         model.load_state_dict(state)
+        model.eval()
         logger.info("Loaded SER weights from %s", WEIGHTS_PATH)
-    else:
-        logger.warning("SER weight file missing at %s; using fallback weights", WEIGHTS_PATH)
-    model.eval()
-    return model
+        return model
+    except Exception as exc:
+        logger.warning("Failed to load SER weights from %s: %s", WEIGHTS_PATH, exc)
+        return None
 
 
 def warmup_audio_model() -> None:
     """Warm model cache at startup."""
 
-    try:
-        _load_ser_model()
-    except Exception as exc:  # pragma: no cover
-        logger.warning("Audio emotion model warmup failed: %s", exc)
+    _load_ser_model()
 
 
 def _normalize_waveform(waveform: np.ndarray) -> np.ndarray:
@@ -101,6 +111,32 @@ def _extract_mfcc(audio_bytes: bytes) -> np.ndarray | None:
     return mfcc.astype(np.float32)
 
 
+def _predict_from_features(features: np.ndarray) -> dict[str, Any]:
+    model = _load_ser_model()
+    if model is None:
+        return _neutral_audio_response()
+
+    tensor = torch.from_numpy(features).unsqueeze(0).unsqueeze(0)
+    try:
+        with torch.no_grad():
+            logits = model(tensor)
+            probs = torch.softmax(logits, dim=-1)[0].cpu().numpy().tolist()
+    except Exception as exc:
+        logger.warning("Audio emotion inference failed: %s", exc)
+        return _neutral_audio_response()
+
+    probabilities = {
+        label: float(score) for label, score in zip(EMOTION_LABELS, probs, strict=False)
+    }
+    emotion = max(probabilities, key=probabilities.get)
+    confidence = float(probabilities[emotion])
+    return {
+        "emotion": emotion,
+        "confidence": confidence,
+        "probabilities": probabilities,
+    }
+
+
 def analyze_audio_emotion(audio_path: str) -> dict[str, Any]:
     """Analyze emotion from an audio file path and return probabilities/confidence."""
 
@@ -110,9 +146,7 @@ def analyze_audio_emotion(audio_path: str) -> dict[str, Any]:
         return {
             "modality": "audio",
             "input": audio_path,
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
+            **_neutral_audio_response(),
         }
 
     features = _extract_mfcc(audio_bytes)
@@ -120,27 +154,13 @@ def analyze_audio_emotion(audio_path: str) -> dict[str, Any]:
         return {
             "modality": "audio",
             "input": audio_path,
-            "emotion": "neutral",
-            "confidence": 0.0,
-            "probabilities": {"neutral": 1.0},
+            **_neutral_audio_response(),
         }
 
-    model = _load_ser_model()
-    tensor = torch.from_numpy(features).unsqueeze(0).unsqueeze(0)
-    with torch.no_grad():
-        logits = model(tensor)
-        probs = torch.softmax(logits, dim=-1)[0].cpu().numpy().tolist()
-
-    probabilities = {
-        label: float(score) for label, score in zip(EMOTION_LABELS, probs, strict=False)
-    }
-    emotion, confidence = max(probabilities.items(), key=lambda kv: kv[1])
     return {
         "modality": "audio",
         "input": audio_path,
-        "emotion": emotion,
-        "confidence": confidence,
-        "probabilities": probabilities,
+        **_predict_from_features(features),
     }
 
 
@@ -152,16 +172,6 @@ def analyze_audio_emotion_bytes(audio_bytes: bytes) -> dict[str, Any] | None:
 
     features = _extract_mfcc(audio_bytes)
     if features is None:
-        return {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 1.0}}
+        return _neutral_audio_response()
 
-    model = _load_ser_model()
-    tensor = torch.from_numpy(features).unsqueeze(0).unsqueeze(0)
-    with torch.no_grad():
-        logits = model(tensor)
-        probs = torch.softmax(logits, dim=-1)[0].cpu().numpy().tolist()
-
-    probabilities = {
-        label: float(score) for label, score in zip(EMOTION_LABELS, probs, strict=False)
-    }
-    emotion, confidence = max(probabilities.items(), key=lambda kv: kv[1])
-    return {"emotion": emotion, "confidence": confidence, "probabilities": probabilities}
+    return _predict_from_features(features)
