@@ -3,7 +3,7 @@ import ChatWindow from './components/ChatWindow';
 import InputBar from './components/InputBar';
 import styles from './App.module.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const API_ENDPOINT = `${API_BASE_URL}/api/v1/analyze`;
 const STREAM_WORD_DELAY_MS = 60;
 const PERMISSION_ERROR_MESSAGE = 'Camera or microphone permission is required.';
@@ -11,7 +11,7 @@ const PERMISSION_ERROR_MESSAGE = 'Camera or microphone permission is required.';
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function formatAssistantResponse(data) {
-  const emotion = data.fused_emotion || 'Unknown';
+  const emotion = data.fused_emotion || data.emotion || 'Unknown';
   const confidence = typeof data.confidence === 'number' ? data.confidence.toFixed(2) : data.confidence ?? 'N/A';
   const responseText = data.response_text || "I'm here with you.";
 
@@ -19,13 +19,25 @@ function formatAssistantResponse(data) {
 }
 
 async function analyzePayload(payload) {
+  const formData = new FormData();
+  formData.append('session_id', 'frontend-session');
+  formData.append('text', payload.text ?? '');
+
+  if (payload.audioBlob) {
+    formData.append('audio', payload.audioBlob, payload.audioFilename || 'recording.wav');
+  } else {
+    formData.append('audio', new Blob([], { type: 'application/octet-stream' }), '');
+  }
+
+  if (payload.imageBlob) {
+    formData.append('image', payload.imageBlob, payload.imageFilename || 'capture.png');
+  } else {
+    formData.append('image', new Blob([], { type: 'application/octet-stream' }), '');
+  }
+
   const response = await fetch(API_ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session_id: 'frontend-session',
-      ...payload,
-    }),
+    body: formData,
   });
 
   const data = await response.json();
@@ -36,6 +48,24 @@ async function analyzePayload(payload) {
   }
 
   return data;
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [metadata, content] = dataUrl.split(',');
+  if (!metadata || !content) {
+    throw new Error('Invalid image data format.');
+  }
+
+  const mimeMatch = metadata.match(/data:(.*?);base64/);
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+
+  const binary = atob(content);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], { type: mimeType });
 }
 
 function stopStreamTracks(stream) {
@@ -166,7 +196,8 @@ export default function App() {
       const userMessage = { id: Date.now(), role: 'user', content: '[Image captured from camera]' };
       setMessages((prev) => [...prev, userMessage]);
       closeCamera();
-      await runAnalysis({ image: imageBase64 });
+      const imageBlob = dataUrlToBlob(imageBase64);
+      await runAnalysis({ imageBlob, imageFilename: 'capture.png' });
     } catch (error) {
       await appendAssistantMessage(`I could not capture an image: ${error.message}`);
     }
@@ -199,14 +230,7 @@ export default function App() {
         const userMessage = { id: Date.now(), role: 'user', content: '[Voice message recorded]' };
         setMessages((prev) => [...prev, userMessage]);
 
-        const audioBase64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result);
-          reader.onerror = () => reject(new Error('Unable to read recorded audio.'));
-          reader.readAsDataURL(audioBlob);
-        });
-
-        await runAnalysis({ audio: audioBase64 });
+        await runAnalysis({ audioBlob, audioFilename: 'recording.wav' });
       };
 
       recorder.start();

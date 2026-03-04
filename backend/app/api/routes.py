@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect, status
 
 from app.schemas import (
     ChatMessage,
     ChatStreamChunk,
     ModalityPredictResponse,
-    MultimodalRequest,
     MultimodalResponse,
     SessionSummaryResponse,
     TextEmotionPredictRequest,
@@ -27,15 +24,6 @@ from app.services.text_emotion import analyze_text_emotion
 
 router = APIRouter(prefix="/api/v1", tags=["inference"])
 
-
-def _decode_base64_payload(data: str, field_name: str) -> bytes:
-    try:
-        return base64.b64decode(data, validate=True)
-    except (ValueError, binascii.Error) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"'{field_name}' must be valid base64-encoded bytes.",
-        ) from exc
 
 
 def _stream_chunks(text: str, *, size: int = 24) -> list[str]:
@@ -114,26 +102,28 @@ async def predict_face(file: UploadFile = File(...)) -> ModalityPredictResponse:
 
 
 @router.post("/analyze", response_model=MultimodalResponse)
-def analyze_multimodal(payload: MultimodalRequest) -> MultimodalResponse:
-    session_id = payload.session_id.strip() or "default"
-    text_value = payload.text.strip()
-    if not text_value:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="'text' is required and cannot be empty.",
-        )
+async def analyze_multimodal(
+    session_id: str = Form(default="default"),
+    text: str = Form(default=""),
+    audio: UploadFile | None = File(default=None),
+    image: UploadFile | None = File(default=None),
+) -> MultimodalResponse:
+    session_id = session_id.strip() or "default"
+    text_value = text.strip()
 
-    text_prediction = analyze_text_emotion(text_value)
+    text_prediction = analyze_text_emotion(text_value) if text_value else {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 1.0}}
 
     audio_prediction = None
-    if payload.audio_bytes:
-        audio_bytes = _decode_base64_payload(payload.audio_bytes, "audio_bytes")
-        audio_prediction = analyze_audio_emotion_bytes(audio_bytes)
+    if audio is not None:
+        audio_bytes = await audio.read()
+        if audio_bytes:
+            audio_prediction = analyze_audio_emotion_bytes(audio_bytes)
 
     face_prediction = None
-    if payload.face_base64:
-        image_bytes = _decode_base64_payload(payload.face_base64, "face_base64")
-        face_prediction = analyze_face_emotion_bytes(image_bytes)
+    if image is not None:
+        image_bytes = await image.read()
+        if image_bytes:
+            face_prediction = analyze_face_emotion_bytes(image_bytes)
 
     fused = combine_predictions(text_prediction, audio_prediction, face_prediction)
 
