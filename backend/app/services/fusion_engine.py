@@ -8,9 +8,12 @@ WEIGHTS = {"text": 0.5, "face": 0.3, "audio": 0.2}
 
 
 def _norm_probs(prediction: dict[str, Any] | None) -> dict[str, float]:
+    """Normalize a modality payload that uses standardized emotion/confidence keys."""
+
     if not prediction:
         return {}
 
+    emotion = str(prediction.get("emotion", "neutral")).lower()
     confidence = max(0.0, min(float(prediction.get("confidence", 0.0)), 1.0))
     if confidence <= 0.0:
         return {}
@@ -22,7 +25,6 @@ def _norm_probs(prediction: dict[str, Any] | None) -> dict[str, float]:
         if total > 0:
             return {k: v / total for k, v in normalized.items()}
 
-    emotion = str(prediction.get("emotion", "neutral")).lower()
     return {emotion: confidence}
 
 

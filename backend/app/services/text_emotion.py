@@ -35,15 +35,12 @@ def warmup_text_model() -> None:
 
 
 def analyze_text_emotion(text: str) -> dict[str, Any]:
-    """Predict text emotion with top class, confidence, and full probabilities."""
+    """Predict text emotion in a standardized ``emotion``/``confidence`` format."""
 
     if not text or not text.strip():
         return {
-            "modality": "text",
-            "input": text,
             "emotion": "neutral",
             "confidence": 0.0,
-            "probabilities": {"neutral": 0.0},
         }
 
     try:
@@ -51,37 +48,32 @@ def analyze_text_emotion(text: str) -> dict[str, Any]:
         result = classifier(text.strip())
         print("Text model raw output:", result)
 
-        if isinstance(result, list):
-            result = result[0]
-
-        probabilities: dict[str, float] = {}
-        for item in result:
-            if isinstance(item, dict) and "label" in item and "score" in item:
-                probabilities[str(item["label"]).lower()] = float(item["score"])
-
-        if not probabilities:
+        if not isinstance(result, list) or not result:
             return {
-                "modality": "text",
-                "input": text,
                 "emotion": "neutral",
                 "confidence": 0.0,
-                "probabilities": {"neutral": 0.0},
             }
 
-        emotion = max(probabilities, key=probabilities.get)
+        top_result = result[0]
+        if isinstance(top_result, list) and top_result:
+            top_result = top_result[0]
+
+        if not isinstance(top_result, dict) or "label" not in top_result or "score" not in top_result:
+            return {
+                "emotion": "neutral",
+                "confidence": 0.0,
+            }
+
+        emotion = str(top_result["label"]).lower()
+        confidence = float(top_result["score"])
+        print("Text emotion detected:", emotion, confidence)
         return {
-            "modality": "text",
-            "input": text,
             "emotion": emotion,
-            "confidence": probabilities[emotion],
-            "probabilities": probabilities,
+            "confidence": confidence,
         }
     except Exception as exc:  # pragma: no cover - runtime/env dependent.
         logger.exception("Text model inference failed: %s", exc)
         return {
-            "modality": "text",
-            "input": text,
             "emotion": "neutral",
             "confidence": 0.0,
-            "probabilities": {"neutral": 0.0},
         }
