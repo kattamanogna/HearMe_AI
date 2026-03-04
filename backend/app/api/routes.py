@@ -111,19 +111,28 @@ async def analyze_multimodal(
     session_id = session_id.strip() or "default"
     text_value = text.strip()
 
-    text_prediction = analyze_text_emotion(text_value) if text_value else {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 1.0}}
+    try:
+        text_prediction = analyze_text_emotion(text_value) if text_value else {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 1.0}}
+    except Exception:
+        text_prediction = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 1.0}}
 
     audio_prediction = None
     if audio is not None:
-        audio_bytes = await audio.read()
-        if audio_bytes:
-            audio_prediction = analyze_audio_emotion_bytes(audio_bytes)
+        try:
+            audio_bytes = await audio.read()
+            if audio_bytes:
+                audio_prediction = analyze_audio_emotion_bytes(audio_bytes)
+        except Exception:
+            audio_prediction = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 0.0}}
 
     face_prediction = None
     if image is not None:
-        image_bytes = await image.read()
-        if image_bytes:
-            face_prediction = analyze_face_emotion_bytes(image_bytes)
+        try:
+            image_bytes = await image.read()
+            if image_bytes:
+                face_prediction = analyze_face_emotion_bytes(image_bytes)
+        except Exception:
+            face_prediction = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 0.0}, "face_detected": False}
 
     fused = combine_predictions(text_prediction, audio_prediction, face_prediction)
 
@@ -140,34 +149,16 @@ async def analyze_multimodal(
     generated = generate_response(session_id, str(fused.get("emotion", "neutral")), text_value)
 
     _neutral = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 0.0}}
-    text_breakdown = {
-        "emotion": str(text_prediction.get("emotion", "neutral")),
-        "confidence": float(text_prediction.get("confidence", 0.0)),
-        "probabilities": {str(k): float(v) for k, v in dict(text_prediction.get("probabilities", {})).items()},
-    }
     face_source = face_prediction or _neutral
     audio_source = audio_prediction or _neutral
-    face_breakdown = {
-        "emotion": str(face_source.get("emotion", "neutral")),
-        "confidence": float(face_source.get("confidence", 0.0)),
-        "probabilities": {str(k): float(v) for k, v in dict(face_source.get("probabilities", {})).items()},
-        "face_detected": bool(face_source.get("face_detected", False)),
-    }
-    audio_breakdown = {
-        "emotion": str(audio_source.get("emotion", "neutral")),
-        "confidence": float(audio_source.get("confidence", 0.0)),
-        "probabilities": {str(k): float(v) for k, v in dict(audio_source.get("probabilities", {})).items()},
-    }
 
     return MultimodalResponse(
-        emotion=str(fused.get("emotion", "neutral")),
+        text_emotion=str(text_prediction.get("emotion", "neutral")),
+        face_emotion=str(face_source.get("emotion", "neutral")),
+        audio_emotion=str(audio_source.get("emotion", "neutral")),
+        fused_emotion=str(fused.get("emotion", "neutral")),
         confidence=float(fused.get("confidence", 0.0)),
         response_text=str(generated["response_text"]),
-        modality_breakdown={
-            "text": text_breakdown,
-            "face": face_breakdown,
-            "audio": audio_breakdown,
-        },
     )
 
 
