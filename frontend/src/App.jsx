@@ -3,10 +3,9 @@ import ChatWindow from './components/ChatWindow';
 import InputBar from './components/InputBar';
 import styles from './App.module.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const API_ENDPOINT = `${API_BASE_URL}/api/v1/analyze`;
 const STREAM_WORD_DELAY_MS = 60;
 const PERMISSION_ERROR_MESSAGE = 'Camera or microphone permission is required.';
+const API_ENDPOINT = 'http://127.0.0.1:8000/api/v1/analyze';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -136,6 +135,37 @@ export default function App() {
     setIsStreaming(false);
   };
 
+  const addBotMessage = (content) => {
+    setMessages((prev) => [...prev, { id: Date.now() + Math.random(), role: 'assistant', content }]);
+  };
+
+  const analyzeEmotion = async (message) => {
+    try {
+      const response = await fetch('http://127.0.0.1:8000/api/v1/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: message,
+          session_id: 'frontend-session',
+        }),
+      });
+
+      const data = await response.json();
+      console.log('Emotion API response:', data);
+
+      if (data && data.emotion) {
+        addBotMessage(`I understand you're feeling ${data.emotion}. I'm here to listen.`);
+      } else {
+        addBotMessage("I couldn't detect the emotion clearly.");
+      }
+    } catch (error) {
+      console.error('Emotion API error:', error);
+      addBotMessage('Sorry, something went wrong analyzing your message.');
+    }
+  };
+
   const runAnalysis = async (payload) => {
     setIsAnalyzing(true);
     try {
@@ -152,10 +182,11 @@ export default function App() {
     }
   };
 
-  const handleSend = async (text) => {
-    const userMessage = { id: Date.now(), role: 'user', content: text };
+  const handleSend = async (message) => {
+    const userMessage = { id: Date.now(), role: 'user', content: message };
     setMessages((prev) => [...prev, userMessage]);
-    await runAnalysis({ text });
+    console.log('Sending message:', message);
+    await analyzeEmotion(message);
   };
 
   const closeCamera = () => {

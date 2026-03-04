@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect, status
 
 from app.schemas import (
     ChatMessage,
     ChatStreamChunk,
     ModalityPredictResponse,
-    MultimodalResponse,
     SessionSummaryResponse,
     TextEmotionPredictRequest,
     TextEmotionPredictResponse,
@@ -18,7 +17,6 @@ from app.schemas import (
 from app.services.audio_emotion import analyze_audio_emotion_bytes
 from app.services.face_emotion import analyze_face_emotion_bytes
 from app.services.chat_response import generate_response
-from app.services.fusion_engine import combine_predictions
 from app.services.session_manager import get_session_summary, store_interaction
 from app.services.text_emotion import analyze_text_emotion
 
@@ -101,65 +99,48 @@ async def predict_face(file: UploadFile = File(...)) -> ModalityPredictResponse:
     )
 
 
-@router.post("/analyze", response_model=MultimodalResponse)
-async def analyze_multimodal(
-    session_id: str = Form(default="default"),
-    text: str = Form(default=""),
-    audio: UploadFile | None = File(default=None),
-    image: UploadFile | None = File(default=None),
-) -> MultimodalResponse:
-    session_id = session_id.strip() or "default"
-    text_value = text.strip()
+@router.post("/analyze")
+async def analyze_multimodal(request: Request) -> dict[str, float | str]:
+    content_type = request.headers.get("content-type", "")
+    session_id = "frontend-session"
+    text_value = ""
+
+    if "application/json" in content_type:
+        payload = await request.json()
+        text_value = str(payload.get("text", "")).strip()
+        session_id = str(payload.get("session_id", "frontend-session")).strip() or "frontend-session"
+    else:
+        form = await request.form()
+        text_value = str(form.get("text", "")).strip()
+        session_id = str(form.get("session_id", "frontend-session")).strip() or "frontend-session"
+
+    if not text_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'text' is required and cannot be empty.",
+        )
+
+    print("Emotion API request received:", text_value)
 
     try:
-        text_prediction = analyze_text_emotion(text_value) if text_value else {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 1.0}}
+        result = analyze_text_emotion(text_value)
     except Exception:
-        text_prediction = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 1.0}}
+        result = {"emotion": "neutral", "confidence": 0.0}
 
-    audio_prediction = None
-    if audio is not None:
-        try:
-            audio_bytes = await audio.read()
-            if audio_bytes:
-                audio_prediction = analyze_audio_emotion_bytes(audio_bytes)
-        except Exception:
-            audio_prediction = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 0.0}}
-
-    face_prediction = None
-    if image is not None:
-        try:
-            image_bytes = await image.read()
-            if image_bytes:
-                face_prediction = analyze_face_emotion_bytes(image_bytes)
-        except Exception:
-            face_prediction = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 0.0}, "face_detected": False}
-
-    fused = combine_predictions(text_prediction, audio_prediction, face_prediction)
+    emotion = str(result.get("emotion", "neutral"))
+    confidence = float(result.get("confidence", 0.0))
 
     timestamp = datetime.now(timezone.utc).isoformat()
     store_interaction(
         session_id,
         user_text=text_value,
-        emotion=str(fused.get("emotion", "neutral")),
-        confidence=float(fused.get("confidence", 0.0)),
+        emotion=emotion,
+        confidence=confidence,
         route="/api/v1/analyze",
         timestamp=timestamp,
     )
 
-    generated = generate_response(session_id, str(fused.get("emotion", "neutral")), text_value)
-
-    _neutral = {"emotion": "neutral", "confidence": 0.0, "probabilities": {"neutral": 0.0}}
-    face_source = face_prediction or _neutral
-    audio_source = audio_prediction or _neutral
-
-    return MultimodalResponse(
-        text_emotion=str(text_prediction.get("emotion", "neutral")),
-        face_emotion=str(face_source.get("emotion", "neutral")),
-        audio_emotion=str(audio_source.get("emotion", "neutral")),
-        fused_emotion=str(fused.get("emotion", "neutral")),
-        confidence=float(fused.get("confidence", 0.0)),
-        response_text=str(generated["response_text"]),
-    )
+    return {"emotion": emotion, "confidence": confidence}
 
 
 @router.websocket("/ws/chat")
