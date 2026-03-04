@@ -46,10 +46,12 @@ class MultimodalRequest(BaseModel):
 
 
 class MultimodalResponse(BaseModel):
-    emotion: str = Field(..., description="Final fused emotion across available signals.")
+    text_emotion: str = Field(..., description="Emotion inferred from text.")
+    face_emotion: str = Field(..., description="Emotion inferred from face image.")
+    audio_emotion: str = Field(..., description="Emotion inferred from audio.")
+    fused_emotion: str = Field(..., description="Final fused emotion across available signals.")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Fusion confidence score.")
     response_text: str = Field(...)
-    modality_breakdown: dict[str, dict[str, float | str | bool | dict[str, float]]] = Field(default_factory=dict)
 
 
 class SessionSummaryResponse(BaseModel):

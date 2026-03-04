@@ -48,22 +48,32 @@ def analyze_text_emotion(text: str) -> dict[str, Any]:
 
     try:
         classifier = _get_text_classifier()
-        results = classifier(text.strip())[0]
+        result = classifier(text.strip())
+        print("Text model raw output:", result)
+
+        if isinstance(result, list):
+            result = result[0]
+
         probabilities: dict[str, float] = {}
-        for item in results:
+        for item in result:
             if isinstance(item, dict) and "label" in item and "score" in item:
                 probabilities[str(item["label"]).lower()] = float(item["score"])
 
         if not probabilities:
-            raise ValueError("No valid emotion scores returned from text model")
+            return {
+                "modality": "text",
+                "input": text,
+                "emotion": "neutral",
+                "confidence": 0.0,
+                "probabilities": {"neutral": 0.0},
+            }
 
-        top_emotion = max(probabilities, key=probabilities.get)
-        top_confidence = float(probabilities[top_emotion])
+        emotion = max(probabilities, key=probabilities.get)
         return {
             "modality": "text",
             "input": text,
-            "emotion": top_emotion,
-            "confidence": top_confidence,
+            "emotion": emotion,
+            "confidence": probabilities[emotion],
             "probabilities": probabilities,
         }
     except Exception as exc:  # pragma: no cover - runtime/env dependent.

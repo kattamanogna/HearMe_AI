@@ -19,15 +19,20 @@ logger = logging.getLogger(__name__)
 
 try:
     from deepface import DeepFace  # type: ignore
+    import cv2
+
+    DEEPFACE_AVAILABLE = True
 except Exception as exc:  # pragma: no cover - dependency/runtime dependent.
+    print("DeepFace import error:", exc)
     DeepFace = None  # type: ignore[assignment]
+    DEEPFACE_AVAILABLE = False
     logger.warning("DeepFace dependency unavailable, face model disabled: %s", exc)
 
 
 def warmup_face_model() -> None:
     """Warm face-analysis stack at startup."""
 
-    if DeepFace is None:
+    if not DEEPFACE_AVAILABLE:
         logger.warning("Skipping face model warmup because DeepFace is not installed.")
 
 
@@ -55,52 +60,32 @@ def _analyze_face_image(image: np.ndarray | None) -> dict[str, Any]:
         logger.warning("Face inference skipped: image is None.")
         return _neutral_face_response(face_detected=False)
 
-    if DeepFace is None:
+    if not DEEPFACE_AVAILABLE or DeepFace is None:
         logger.warning("Face inference fallback: DeepFace dependency is missing.")
         return _neutral_face_response(face_detected=False)
 
     try:
-        faces = DeepFace.extract_faces(
+        analysis = DeepFace.analyze(
             img_path=image,
-            detector_backend="opencv",
+            actions=["emotion"],
             enforce_detection=False,
         )
     except Exception as exc:
-        logger.warning("DeepFace face-detection error: %s", exc)
-        return _neutral_face_response(face_detected=False)
-
-    if not faces:
-        logger.warning("No face detected in provided image.")
-        return _neutral_face_response(face_detected=False)
-
-    try:
-        result = DeepFace.analyze(
-            img_path=image,
-            actions=["emotion"],
-            detector_backend="opencv",
-            enforce_detection=True,
-            silent=True,
-        )
-    except Exception as exc:
         logger.warning("DeepFace emotion inference failed: %s", exc)
-        return _neutral_face_response(face_detected=True)
+        return _neutral_face_response(face_detected=False)
 
-    payload = result[0] if isinstance(result, list) else result
-    probs_raw = payload.get("emotion", {})
-    probabilities = {
-        str(label).lower(): float(score) / 100.0
-        for label, score in probs_raw.items()
-    }
+    payload = analysis[0] if isinstance(analysis, list) else analysis
+    emotion = str(payload.get("dominant_emotion", "neutral")).lower()
+    emotion_scores = payload.get("emotion", {})
+    confidence = float(emotion_scores.get(emotion, 0.0)) / 100.0
+    probabilities = {str(label).lower(): float(score) / 100.0 for label, score in dict(emotion_scores).items()}
 
     if not probabilities:
         logger.warning("DeepFace returned empty emotion scores.")
-        return _neutral_face_response(face_detected=True)
-
-    dominant = str(payload.get("dominant_emotion", "neutral")).lower()
-    confidence = float(probabilities.get(dominant, 0.0))
+        return _neutral_face_response(face_detected=False)
 
     return {
-        "emotion": dominant,
+        "emotion": emotion,
         "confidence": confidence,
         "probabilities": probabilities,
         "face_detected": True,
