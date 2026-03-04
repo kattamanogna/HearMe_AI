@@ -13,7 +13,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function formatAssistantResponse(data) {
   const emotion = data.fused_emotion || 'Unknown';
   const confidence = typeof data.confidence === 'number' ? data.confidence.toFixed(2) : data.confidence ?? 'N/A';
-  const responseText = data.empathetic_response || data.response_text || "I'm here with you.";
+  const responseText = data.response_text || "I'm here with you.";
 
   return `Emotion detected: ${emotion} (Confidence: ${confidence})\n"${responseText}"`;
 }
@@ -28,12 +28,14 @@ async function analyzePayload(payload) {
     }),
   });
 
+  const data = await response.json();
+
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    throw new Error(errorBody.detail || 'Unable to analyze message right now.');
+    console.error(data);
+    throw new Error(data?.detail || 'Unable to analyze message right now.');
   }
 
-  return response.json();
+  return data;
 }
 
 function stopStreamTracks(stream) {
@@ -110,9 +112,13 @@ export default function App() {
       const data = await analyzePayload(payload);
       setIsAnalyzing(false);
       await appendAssistantMessage(formatAssistantResponse(data));
-    } catch (error) {
+    } catch (err) {
       setIsAnalyzing(false);
-      await appendAssistantMessage(`I ran into an issue while analyzing that message: ${error.message}`);
+      console.error(err);
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now() + Math.random(), role: 'assistant', content: 'Sorry, something went wrong analyzing your message.' },
+      ]);
     }
   };
 
