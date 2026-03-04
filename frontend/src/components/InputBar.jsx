@@ -25,7 +25,14 @@ function SendIcon() {
   );
 }
 
-export default function InputBar({ onSend, disabled }) {
+export default function InputBar({
+  onSend,
+  disabled,
+  onOpenCamera,
+  onStartRecording,
+  onStopRecording,
+  isRecording,
+}) {
   const [value, setValue] = useState('');
 
   const handleSubmit = (event) => {
@@ -48,12 +55,35 @@ export default function InputBar({ onSend, disabled }) {
         onChange={(event) => setValue(event.target.value)}
         disabled={disabled}
       />
-      <button type="button" className={styles.iconButton} aria-label="Open camera" disabled={disabled}>
+      <button
+        type="button"
+        className={styles.iconButton}
+        aria-label="Open camera"
+        disabled={disabled}
+        onClick={onOpenCamera}
+      >
         <CameraIcon />
       </button>
-      <button type="button" className={styles.iconButton} aria-label="Record audio" disabled={disabled}>
-        <MicIcon />
-      </button>
+      {isRecording ? (
+        <button
+          type="button"
+          className={`${styles.iconButton} ${styles.stopButton}`}
+          aria-label="Stop recording"
+          onClick={onStopRecording}
+        >
+          Stop
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label="Record audio"
+          disabled={disabled}
+          onClick={onStartRecording}
+        >
+          <MicIcon />
+        </button>
+      )}
       <button type="submit" className={styles.sendButton} aria-label="Send message" disabled={disabled || !value.trim()}>
         <SendIcon />
       </button>
