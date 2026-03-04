@@ -11,7 +11,37 @@ function TypingIndicator() {
   );
 }
 
-export default function ChatWindow({ messages, isAnalyzing, isStreaming }) {
+function CameraPreview({ isOpen, videoRef, onCapture, onClose }) {
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <section className={styles.cameraPanel} aria-label="Camera preview">
+      <video ref={videoRef} autoPlay playsInline muted className={styles.cameraVideo} />
+      <div className={styles.cameraActions}>
+        <button type="button" className={styles.cameraButton} onClick={onCapture}>
+          Capture
+        </button>
+        <button type="button" className={`${styles.cameraButton} ${styles.closeButton}`} onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </section>
+  );
+}
+
+export default function ChatWindow({
+  messages,
+  isAnalyzing,
+  isStreaming,
+  isRecording,
+  cameraOpen,
+  cameraVideoRef,
+  onCapture,
+  onCloseCamera,
+  permissionError,
+}) {
   const chatWindowRef = useRef(null);
   const lastAssistantMessageId = [...messages].reverse().find((message) => message.role === 'assistant')?.id;
 
@@ -25,10 +55,16 @@ export default function ChatWindow({ messages, isAnalyzing, isStreaming }) {
       top: chatWindow.scrollHeight,
       behavior: 'smooth',
     });
-  }, [messages, isAnalyzing, isStreaming]);
+  }, [messages, isAnalyzing, isStreaming, cameraOpen, isRecording, permissionError]);
 
   return (
     <section ref={chatWindowRef} className={styles.chatWindow} aria-live="polite">
+      {cameraOpen ? (
+        <CameraPreview isOpen={cameraOpen} videoRef={cameraVideoRef} onCapture={onCapture} onClose={onCloseCamera} />
+      ) : null}
+      {isRecording ? <div className={styles.recordingIndicator}>Recording...</div> : null}
+      {permissionError ? <div className={styles.permissionError}>{permissionError}</div> : null}
+
       {messages.map((message) => (
         <MessageBubble
           key={message.id}
