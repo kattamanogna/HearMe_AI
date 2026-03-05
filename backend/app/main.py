@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.services.audio_emotion import warmup_audio_model
@@ -34,6 +35,14 @@ def create_app() -> FastAPI:
         title="HearMe_AI",
         description="Multimodal mental health AI chatbot backend.",
         version="0.1.0",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @app.middleware("http")
