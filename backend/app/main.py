@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import os
+
+# Hide TensorFlow info and warning logs
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+# Disable oneDNN CPU optimization logs
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 import logging
 from datetime import datetime, timezone
 
