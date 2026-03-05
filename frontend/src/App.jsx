@@ -3,51 +3,8 @@ import ChatWindow from './components/ChatWindow';
 import InputBar from './components/InputBar';
 import styles from './App.module.css';
 
-const STREAM_WORD_DELAY_MS = 60;
 const PERMISSION_ERROR_MESSAGE = 'Camera or microphone permission is required.';
-const API_ENDPOINT = 'http://127.0.0.1:8000/api/v1/analyze';
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function formatAssistantResponse(data) {
-  const emotion = data.fused_emotion || data.emotion || 'Unknown';
-  const confidence = typeof data.confidence === 'number' ? data.confidence.toFixed(2) : data.confidence ?? 'N/A';
-  const responseText = data.response_text || "I'm here with you.";
-
-  return `Emotion detected: ${emotion} (Confidence: ${confidence})\n"${responseText}"`;
-}
-
-async function analyzePayload(payload) {
-  const formData = new FormData();
-  formData.append('session_id', 'frontend-session');
-  formData.append('text', payload.text ?? '');
-
-  if (payload.audioBlob) {
-    formData.append('audio', payload.audioBlob, payload.audioFilename || 'recording.wav');
-  } else {
-    formData.append('audio', new Blob([], { type: 'application/octet-stream' }), '');
-  }
-
-  if (payload.imageBlob) {
-    formData.append('image', payload.imageBlob, payload.imageFilename || 'capture.png');
-  } else {
-    formData.append('image', new Blob([], { type: 'application/octet-stream' }), '');
-  }
-
-  const response = await fetch(API_ENDPOINT, {
-    method: 'POST',
-    body: formData,
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error(data);
-    throw new Error(data?.detail || 'Unable to analyze message right now.');
-  }
-
-  return data;
-}
 
 function dataUrlToBlob(dataUrl) {
   const [metadata, content] = dataUrl.split(',');
@@ -98,7 +55,7 @@ export default function App() {
     },
   ]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
+  const isStreaming = false;
   const [cameraOpen, setCameraOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [permissionError, setPermissionError] = useState('');
@@ -109,34 +66,17 @@ export default function App() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  const appendAssistantMessage = async (fullText) => {
-    const messageId = Date.now() + Math.random();
-    const words = fullText.split(/\s+/).filter(Boolean);
-
-    setIsStreaming(true);
-    setMessages((prev) => [...prev, { id: messageId, role: 'assistant', content: '' }]);
-
-    let partialContent = '';
-    for (const word of words) {
-      partialContent = partialContent ? `${partialContent} ${word}` : word;
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.id === messageId
-            ? {
-                ...message,
-                content: partialContent,
-              }
-            : message,
-        ),
-      );
-      await delay(STREAM_WORD_DELAY_MS);
-    }
-
-    setIsStreaming(false);
-  };
-
   const addBotMessage = (content) => {
     setMessages((prev) => [...prev, { id: Date.now() + Math.random(), role: 'assistant', content }]);
+  };
+
+  const addEmotionBotMessage = (data) => {
+    if (data?.emotion) {
+      addBotMessage(`I understand you're feeling ${data.emotion}. I'm here to listen.`);
+      return;
+    }
+
+    addBotMessage("I couldn't detect the emotion clearly.");
   };
 
   const analyzeEmotion = async (message) => {
@@ -155,30 +95,10 @@ export default function App() {
       const data = await response.json();
       console.log('Emotion API response:', data);
 
-      if (data && data.emotion) {
-        addBotMessage(`I understand you're feeling ${data.emotion}. I'm here to listen.`);
-      } else {
-        addBotMessage("I couldn't detect the emotion clearly.");
-      }
+      addEmotionBotMessage(data);
     } catch (error) {
       console.error('Emotion API error:', error);
       addBotMessage('Sorry, something went wrong analyzing your message.');
-    }
-  };
-
-  const runAnalysis = async (payload) => {
-    setIsAnalyzing(true);
-    try {
-      const data = await analyzePayload(payload);
-      setIsAnalyzing(false);
-      await appendAssistantMessage(formatAssistantResponse(data));
-    } catch (err) {
-      setIsAnalyzing(false);
-      console.error(err);
-      setMessages((prev) => [
-        ...prev,
-        { id: Date.now() + Math.random(), role: 'assistant', content: 'Sorry, something went wrong analyzing your message.' },
-      ]);
     }
   };
 
@@ -228,9 +148,26 @@ export default function App() {
       setMessages((prev) => [...prev, userMessage]);
       closeCamera();
       const imageBlob = dataUrlToBlob(imageBase64);
-      await runAnalysis({ imageBlob, imageFilename: 'capture.png' });
+      const formData = new FormData();
+      formData.append('file', imageBlob, 'capture.png');
+
+      setIsAnalyzing(true);
+      const response = await fetch('http://127.0.0.1:8000/api/v1/predict-face', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Unable to analyze image right now.');
+      }
+
+      addEmotionBotMessage(data);
     } catch (error) {
-      await appendAssistantMessage(`I could not capture an image: ${error.message}`);
+      addBotMessage('Sorry, something went wrong analyzing your message.');
+      console.error('Face API error:', error);
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -261,7 +198,28 @@ export default function App() {
         const userMessage = { id: Date.now(), role: 'user', content: '[Voice message recorded]' };
         setMessages((prev) => [...prev, userMessage]);
 
-        await runAnalysis({ audioBlob, audioFilename: 'recording.wav' });
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'recording.wav');
+
+        setIsAnalyzing(true);
+        try {
+          const response = await fetch('http://127.0.0.1:8000/api/v1/predict-audio', {
+            method: 'POST',
+            body: formData,
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data?.detail || 'Unable to analyze audio right now.');
+          }
+
+          addEmotionBotMessage(data);
+        } catch (error) {
+          console.error('Audio API error:', error);
+          addBotMessage('Sorry, something went wrong analyzing your message.');
+        } finally {
+          setIsAnalyzing(false);
+        }
       };
 
       recorder.start();
