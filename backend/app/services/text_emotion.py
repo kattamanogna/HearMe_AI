@@ -130,16 +130,37 @@ def _empty_analysis() -> dict[str, Any]:
 
 def _predict_emotion_scores(text: str) -> dict[str, float]:
     try:
-        result = _get_text_classifier()(text)
-        rows = result[0] if result and isinstance(result[0], list) else result
-        if not isinstance(rows, list):
-            return {}
-        scores = {}
-        for row in rows:
-            if isinstance(row, dict) and "label" in row and "score" in row:
-                label = _normalize_emotion(str(row["label"]))
-                scores[label] = max(scores.get(label, 0.0), float(row["score"]))
-        return scores
+        classifier = _get_text_classifier()
+        result = classifier(text.strip())
+        print("Text model raw output:", result)
+
+        if not isinstance(result, list) or not result:
+            return {
+                "emotion": "neutral",
+                "confidence": 0.0,
+            }
+
+        top_result = result[0]
+        if isinstance(top_result, list) and top_result:
+            top_result = top_result[0]
+
+        if (
+            not isinstance(top_result, dict)
+            or "label" not in top_result
+            or "score" not in top_result
+        ):
+            return {
+                "emotion": "neutral",
+                "confidence": 0.0,
+            }
+
+        emotion = str(top_result["label"]).lower()
+        confidence = float(top_result["score"])
+        print("Text emotion detected:", emotion, confidence)
+        return {
+            "emotion": emotion,
+            "confidence": confidence,
+        }
     except Exception as exc:  # pragma: no cover - runtime/env dependent.
         logger.exception("Text model inference failed: %s", exc)
         return {}
