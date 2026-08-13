@@ -41,12 +41,33 @@ def test_generate_response_preserves_crisis_safety(monkeypatch):
     assert result["crisis_detected"] is True
     assert result["severity"] == "high"
     assert "988" in str(result["response_text"])
+    assert "safety first" in str(result["response_text"])
+
+
+def test_generate_response_routes_requested_safety_categories_to_crisis_support(monkeypatch):
+    monkeypatch.setenv("ENABLE_HF_CHAT_RESPONSE", "0")
+
+    messages = [
+        "I keep thinking about self harm",
+        "My partner is abusive and I am not safe at home",
+        "I am having a panic attack and can't breathe",
+        "This is a crisis and I need help",
+    ]
+
+    for index, message in enumerate(messages):
+        result = generate_response(f"session-crisis-{index}", "anxiety", message)
+
+        assert result["crisis_detected"] is True
+        assert result["severity"] == "high"
+        response = str(result["response_text"])
+        assert "safety first" in response
+        assert "Because this sounds anxious" not in response
 
 
 def test_generate_response_personalizes_anxiety_coping_to_work_context(monkeypatch):
     monkeypatch.setenv("ENABLE_HF_CHAT_RESPONSE", "0")
 
-    result = generate_response("session-anxiety", "anxiety", "My boss moved up the deadline and I feel panicky")
+    result = generate_response("session-anxiety", "anxiety", "My boss moved up the deadline and I feel anxious")
 
     response = str(result["response_text"])
     assert "Because this sounds anxious" in response
