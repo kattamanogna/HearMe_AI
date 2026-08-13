@@ -6,8 +6,6 @@ import os
 import re
 from functools import lru_cache
 
-from app.services.session_manager import get_last_template_index, set_last_template_index
-
 # Lightweight safety list to avoid echoing harmful language in generated replies.
 _BLOCKED_TERMS = {
     "kill",
@@ -34,44 +32,53 @@ EMERGENCY_SUPPORT_MESSAGE = (
     "(US/Canada) by calling or texting 988. If you're elsewhere, please contact your local crisis hotline immediately."
 )
 
-_EMOTION_TEMPLATES: dict[str, list[str]] = {
-    "happy": [
-        "It's great to hear this uplift in your mood—keep noticing what is helping.",
-        "That sounds like a meaningful positive moment. You're building good momentum.",
-    ],
-    "sad": [
-        "I'm really sorry this feels so heavy. We can take this one small step at a time.",
-        "Thank you for sharing this. You deserve support, and we can focus on one gentle next step.",
-    ],
-    "angry": [
-        "I hear how intense this feels. Let's pause and pick one calming action you can take right now.",
-        "Your frustration makes sense. A slow breath and short reset can help you respond from a steadier place.",
-    ],
-    "anxious": [
-        "That sounds really stressful. Try a grounding check: name 5 things you can see and 4 you can feel.",
-        "You're carrying a lot right now. Let's anchor in the present with one slow breath and one manageable task.",
-    ],
-    "fear": [
-        "That sounds really stressful. Try a grounding check: name 5 things you can see and 4 you can feel.",
-        "You're carrying a lot right now. Let's anchor in the present with one slow breath and one manageable task.",
-    ],
-    "neutral": [
-        "Thanks for sharing. I'm here with you while we work through this.",
-        "I appreciate you checking in. Let's keep exploring what would help most right now.",
-    ],
+_EMOTION_DETAILS: dict[str, dict[str, str]] = {
+    "happy": {
+        "acknowledgement": "I'm glad there's some brightness in this moment.",
+        "validation": "It makes sense to let yourself enjoy something that feels good.",
+        "suggestion": "You might pause and notice what helped create this, or share the good news with someone who'd celebrate with you.",
+        "encouragement": "Hold onto this; positive moments matter, even when they're small.",
+        "question": "What's been the best part of it for you?",
+    },
+    "sad": {
+        "acknowledgement": "I'm really sorry this is weighing on you.",
+        "validation": "Feeling low can be exhausting, and it makes sense that this would hurt.",
+        "suggestion": "If it feels doable, try one gentle next step: drink some water, step outside for a minute, or text someone safe.",
+        "encouragement": "You don't have to solve everything at once; just getting through the next small piece counts.",
+        "question": "What feels heaviest right now?",
+    },
+    "angry": {
+        "acknowledgement": "I can hear how fired up and frustrated this has left you.",
+        "validation": "Anger often shows up when something feels unfair, painful, or out of your control.",
+        "suggestion": "Before responding, it may help to take a short pause, unclench your jaw, and write the first unfiltered version somewhere private.",
+        "encouragement": "You can take care of yourself without letting this moment decide everything for you.",
+        "question": "What part of this crossed the line for you?",
+    },
+    "anxious": {
+        "acknowledgement": "That sounds like a lot for your mind and body to carry.",
+        "validation": "Anxiety can feel so convincing when you're trying to handle uncertainty or pressure.",
+        "suggestion": "Try planting both feet on the floor and naming five things you can see, then pick just one next task that is small enough to start.",
+        "encouragement": "You can move through this one breath and one choice at a time.",
+        "question": "What's the worry that keeps looping the loudest?",
+    },
+    "neutral": {
+        "acknowledgement": "I'm here with you.",
+        "validation": "Whatever you're noticing is worth taking seriously, even if it feels hard to name yet.",
+        "suggestion": "You could start by checking in with your body, your energy, or the one thing you most need today.",
+        "encouragement": "We can take this at your pace.",
+        "question": "What would feel helpful to talk through first?",
+    },
 }
 
-
-def _build_supportive_follow_up(emotion: str) -> str:
-    normalized = _normalized_emotion(emotion)
-    follow_ups = {
-        "sad": "Would it help to share what feels hardest right now, so we can break it into one manageable step?",
-        "angry": "Would you like to name what triggered this, then choose one response you can control next?",
-        "anxious": "Would you like a 30-second grounding exercise together before we continue?",
-        "happy": "What do you think is helping most right now, so you can keep that support going?",
-        "neutral": "Would you like to tell me a little more about what your day has been like?",
-    }
-    return follow_ups.get(normalized, follow_ups["neutral"])
+_EMOTION_ALIASES = {
+    "sadness": "sad",
+    "fear": "anxious",
+    "fearful": "anxious",
+    "anxiety": "anxious",
+    "joy": "happy",
+    "happiness": "happy",
+    "anger": "angry",
+}
 
 
 def generate_mental_health_response(
@@ -79,28 +86,11 @@ def generate_mental_health_response(
     confidence: float | None = None,
     conversation_history: str | None = None,
 ) -> str:
-    """Create a concise, empathetic, safety-aware message for a detected emotion.
+    """Create a concise, empathetic, safety-aware message for a detected emotion."""
 
-    Args:
-        emotion: Emotion label (e.g., sad, anxious, angry).
-        confidence: Optional confidence score in [0, 1].
-        conversation_history: Optional serialized history; currently used as an
-            extensibility input for future prompt-grounded behavior.
-    """
-
-    del conversation_history  # Reserved for future context-aware tailoring.
-
-    normalized = _normalized_emotion(emotion)
-    templates = _EMOTION_TEMPLATES.get(normalized, _EMOTION_TEMPLATES["neutral"])
-    base = templates[0]
-
-    if normalized == "sad" and confidence is not None and confidence >= 0.8:
-        base = (
-            "I'm really sorry you're feeling this way. You don't have to carry this alone, "
-            "and we can move through this one small step at a time."
-        )
-
-    return f"{base} {_build_supportive_follow_up(normalized)}"
+    del confidence  # The structure stays supportive regardless of classifier confidence.
+    user_text = conversation_history or ""
+    return _compose_human_response(emotion, user_text)
 
 
 @lru_cache(maxsize=1)
@@ -117,11 +107,11 @@ def _load_hf_generator():
         return None
 
 
-
 def warmup_response_generator() -> None:
     """Warm optional response-generation model at startup."""
 
     _load_hf_generator()
+
 
 def _sanitize_text(text: str) -> str:
     cleaned = text.strip()
@@ -138,27 +128,37 @@ def detect_crisis_language(text: str) -> bool:
 
 def _normalized_emotion(emotion: str) -> str:
     value = emotion.strip().lower() if emotion else "neutral"
-    if value == "fearful":
-        return "anxious"
-    return value
+    return _EMOTION_ALIASES.get(value, value)
 
 
-def _template_response(session_id: str, emotion: str) -> str:
-    normalized = _normalized_emotion(emotion)
-    templates = _EMOTION_TEMPLATES.get(normalized, _EMOTION_TEMPLATES["neutral"])
+def _short_reflection(text: str) -> str:
+    safe_text = _sanitize_text(text)
+    if not safe_text:
+        return "It sounds like you're checking in and trying to make sense of what's going on."
 
-    previous_index = get_last_template_index(session_id, normalized)
-    if previous_index is None:
-        next_index = 0
-    else:
-        next_index = (previous_index + 1) % len(templates)
+    trimmed = safe_text.rstrip(".!?")
+    if len(trimmed) > 130:
+        trimmed = f"{trimmed[:127].rsplit(' ', 1)[0]}..."
+    return f"From what you shared, {trimmed.lower()}."
 
-    set_last_template_index(session_id, normalized, next_index)
-    return templates[next_index]
+
+def _compose_human_response(emotion: str, text: str) -> str:
+    details = _EMOTION_DETAILS.get(_normalized_emotion(emotion), _EMOTION_DETAILS["neutral"])
+    reflection = _short_reflection(text)
+    return " ".join(
+        [
+            details["acknowledgement"],
+            details["validation"],
+            reflection,
+            details["suggestion"],
+            details["encouragement"],
+            details["question"],
+        ]
+    )
 
 
 def generate_response(session_id: str, emotion: str, text: str) -> dict[str, str | bool]:
-    safe_text = _sanitize_text(text)
+    del session_id  # Responses are generated from the current message and emotion.
 
     if detect_crisis_language(text):
         return {
@@ -167,27 +167,24 @@ def generate_response(session_id: str, emotion: str, text: str) -> dict[str, str
             "severity": "high",
         }
 
-    prefix = _template_response(session_id, emotion)
-
+    safe_text = _sanitize_text(text)
     generator = _load_hf_generator()
     if generator is None:
-        supportive = generate_mental_health_response(emotion)
-        return {
-            "response_text": supportive,
-            "crisis_detected": False,
-            "severity": "low",
-        }
-
-    prompt = (
-        f"Emotion: {emotion}. User message: {safe_text}. "
-        "Write one brief, empathetic, safe response:"
-    )
-    try:
-        output = generator(prompt, max_new_tokens=48, num_return_sequences=1)
-        generated = output[0]["generated_text"].replace(prompt, "").strip()
-        candidate = generated or prefix
-    except Exception:
-        candidate = prefix
+        candidate = _compose_human_response(emotion, safe_text)
+    else:
+        prompt = (
+            "Write a warm, natural reply like a compassionate human friend. "
+            "Follow this order: acknowledge feelings, validate them, reflect the user's words, "
+            "offer one or two practical suggestions if appropriate, encourage them, and end with an open-ended question. "
+            "Avoid robotic labels such as 'I understand you are feeling'. "
+            f"Emotion: {emotion}. User message: {safe_text}. Response:"
+        )
+        try:
+            output = generator(prompt, max_new_tokens=96, num_return_sequences=1)
+            generated = output[0]["generated_text"].replace(prompt, "").strip()
+            candidate = generated or _compose_human_response(emotion, safe_text)
+        except Exception:
+            candidate = _compose_human_response(emotion, safe_text)
 
     return {
         "response_text": _sanitize_text(candidate),
