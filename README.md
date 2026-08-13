@@ -156,7 +156,7 @@ the fused emotion and input text.
 
 ### Optional HuggingFace response generation
 
-By default, chat responses use deterministic templates per emotion. You can enable lightweight
+By default, chat responses use rotating conversational styles per emotion. You can enable lightweight
 HuggingFace text generation by installing `transformers` and setting:
 
 ```bash
@@ -164,7 +164,7 @@ export ENABLE_HF_CHAT_RESPONSE=1
 export HF_CHAT_MODEL=sshleifer/tiny-gpt2
 ```
 
-If model loading fails, the backend automatically falls back to template responses with the same
+If model loading fails, the backend automatically falls back to conversational rule-based responses with the same
 safety filter.
 
 ## Next Implementation Steps

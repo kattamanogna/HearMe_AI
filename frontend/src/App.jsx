@@ -51,7 +51,7 @@ export default function App() {
     {
       id: 1,
       role: 'assistant',
-      content: "Hi, I'm here to listen. Tell me how you're feeling today.",
+      content: "Hi, I'm glad you stopped by. What's been on your mind today?",
     },
   ]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -77,7 +77,7 @@ export default function App() {
     }
 
     if (data?.emotion) {
-      addBotMessage(`I understand you're feeling ${data.emotion}. I'm here to listen.`);
+      addBotMessage(`That sounds like it may be connected to ${data.emotion}. We can take it one step at a time.`);
       return;
     }
 
