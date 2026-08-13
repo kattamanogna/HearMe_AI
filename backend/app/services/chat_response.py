@@ -22,12 +22,30 @@ _BLOCKED_TERMS = {
 }
 
 _CRISIS_PATTERNS = [
+    # Self-harm and suicide signals.
     r"\bkill myself\b",
     r"\bend my life\b",
     r"\bsuicid(?:e|al)\b",
-    r"\bself[-\s]?harm\b",
+    r"\bself[-\s]?harm(?:ing)?\b",
     r"\bhurt myself\b",
+    r"\bcut myself\b",
     r"\bdon't want to live\b",
+    r"\bno reason to live\b",
+    # Abuse and unsafe-environment signals.
+    r"\babuse(?:d|s|r)?\b",
+    r"\babusive\b",
+    r"\bdomestic violence\b",
+    r"\bsexual assault\b",
+    r"\bbeing hit\b",
+    r"\bthey hit me\b",
+    r"\bnot safe at home\b",
+    # Panic, crisis, and urgent danger signals.
+    r"\bpanic(?:king|ked| attack)?\b",
+    r"\bpanicky\b",
+    r"\bcrisis\b",
+    r"\bemergency\b",
+    r"\bimmediate danger\b",
+    r"\bcan't breathe\b",
 ]
 
 _NAME_PATTERNS = [
@@ -98,9 +116,12 @@ _EMOTION_ACTIVITY_FALLBACKS = {
 }
 
 EMERGENCY_SUPPORT_MESSAGE = (
-    "I'm really glad you reached out. If you might hurt yourself or are in immediate danger, "
-    "please call emergency services right now. You can also contact the 988 Suicide & Crisis Lifeline "
-    "(US/Canada) by calling or texting 988. If you're elsewhere, please contact your local crisis hotline immediately."
+    "I'm really glad you told me. This sounds urgent, so let's focus on safety first. "
+    "If you might hurt yourself, someone else might hurt you, or you are in immediate danger, "
+    "call emergency services now or move toward a safer public place if you can. In the U.S. or Canada, "
+    "call or text 988 for the Suicide & Crisis Lifeline; if you're elsewhere, contact your local crisis hotline. "
+    "If this is panic, try to put both feet on the floor, look around, and name five things you can see while "
+    "you slow your breathing. Can you contact one trusted person to stay with you or help you get support right now?"
 )
 
 _RESPONSE_STYLES: dict[str, list[dict[str, str]]] = {
