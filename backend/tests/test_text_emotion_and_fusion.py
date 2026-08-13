@@ -1,5 +1,8 @@
-from app.services.fusion_engine import combine_predictions
 from app.services import text_emotion
+from app.services.chat_response import generate_response
+from app.services.emotional_intelligence import analyze_emotional_context
+from app.services.fusion_engine import combine_predictions
+from app.services.session_manager import store_interaction
 
 
 def test_analyze_text_emotion_standardized_output(monkeypatch):
