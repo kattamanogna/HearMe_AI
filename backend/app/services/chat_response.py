@@ -6,6 +6,16 @@ import os
 import re
 from functools import lru_cache
 
+from app.services.emotional_intelligence import (
+    EmotionalContext,
+    analyze_emotional_context,
+)
+from app.services.session_manager import (
+    get_last_template_index,
+    get_recent_user_messages,
+    set_last_template_index,
+)
+
 # Lightweight safety list to avoid echoing harmful language in generated replies.
 _BLOCKED_TERMS = {
     "kill",
@@ -86,11 +96,85 @@ def generate_mental_health_response(
     confidence: float | None = None,
     conversation_history: str | None = None,
 ) -> str:
-    """Create a concise, empathetic, safety-aware message for a detected emotion."""
+    """Create a concise, empathetic, safety-aware message for a detected emotion.
 
-    del confidence  # The structure stays supportive regardless of classifier confidence.
-    user_text = conversation_history or ""
-    return _compose_human_response(emotion, user_text)
+    Args:
+        emotion: Emotion label (e.g., sad, anxious, angry).
+        confidence: Optional confidence score in [0, 1].
+        conversation_history: Optional serialized history used to tune tone when supplied.
+    """
+
+    normalized = _normalized_emotion(emotion)
+    templates = _EMOTION_TEMPLATES.get(normalized, _EMOTION_TEMPLATES["neutral"])
+    base = templates[0]
+
+    if normalized == "sad" and confidence is not None and confidence >= 0.8:
+        base = (
+            "I'm really sorry you're feeling this way. You don't have to carry this alone, "
+            "and we can move through this one small step at a time."
+        )
+
+    context = analyze_emotional_context(
+        conversation_history or "", primary_emotion=normalized
+    )
+    return _apply_emotional_tone(base, normalized, context)
+
+
+def _apply_emotional_tone(base: str, emotion: str, context: EmotionalContext) -> str:
+    """Adjust response wording to match nuanced emotional context."""
+
+    normalized = _normalized_emotion(emotion)
+    tone_parts: list[str] = []
+
+    if context.hopeless:
+        tone_parts.append(
+            "This sounds painfully stuck, and I want to stay with you in it rather than minimize it."
+        )
+    elif context.intensity == "high":
+        tone_parts.append(
+            "This sounds really intense right now, so let's slow the pace together."
+        )
+    elif context.intensity == "medium":
+        tone_parts.append("I can hear there is a lot of feeling behind this.")
+
+    if context.mixed_emotions:
+        readable = (
+            ", ".join(context.mixed_emotions[:-1])
+            + f" and {context.mixed_emotions[-1]}"
+            if len(context.mixed_emotions) > 1
+            else context.mixed_emotions[0]
+        )
+        tone_parts.append(
+            f"It makes sense that this feels mixed—there may be {readable} here at the same time."
+        )
+
+    if context.confused:
+        tone_parts.append(
+            "If things feel confusing, we can make this simpler and take just the next clear step."
+        )
+
+    if context.sarcastic:
+        tone_parts.append(
+            "I may be hearing some frustration behind the sarcasm, and that frustration matters."
+        )
+
+    if context.repeated_negative_thoughts:
+        tone_parts.append(
+            "I also notice this thought pattern may be circling back, which can make everything feel heavier."
+        )
+
+    if context.grateful:
+        tone_parts.append(
+            "I'm glad you told me, and I appreciate the trust it takes to share this."
+        )
+    elif context.happy and normalized == "happy":
+        tone_parts.append(
+            "I'm happy to hear there is something positive here—let's help you hold onto it."
+        )
+
+    tone_parts.append(base)
+    tone_parts.append(_build_supportive_follow_up(normalized))
+    return " ".join(part for part in tone_parts if part)
 
 
 @lru_cache(maxsize=1)
@@ -157,37 +241,49 @@ def _compose_human_response(emotion: str, text: str) -> str:
     )
 
 
-def generate_response(session_id: str, emotion: str, text: str) -> dict[str, str | bool]:
-    del session_id  # Responses are generated from the current message and emotion.
+def generate_response(
+    session_id: str, emotion: str, text: str
+) -> dict[str, str | bool | dict[str, bool | str | list[str]]]:
+    safe_text = _sanitize_text(text)
+    context = analyze_emotional_context(
+        text,
+        primary_emotion=emotion,
+        recent_user_messages=get_recent_user_messages(session_id),
+    )
 
     if detect_crisis_language(text):
         return {
             "response_text": EMERGENCY_SUPPORT_MESSAGE,
             "crisis_detected": True,
             "severity": "high",
+            "emotional_context": context.as_dict(),
         }
 
     safe_text = _sanitize_text(text)
     generator = _load_hf_generator()
     if generator is None:
-        candidate = _compose_human_response(emotion, safe_text)
-    else:
-        prompt = (
-            "Write a warm, natural reply like a compassionate human friend. "
-            "Follow this order: acknowledge feelings, validate them, reflect the user's words, "
-            "offer one or two practical suggestions if appropriate, encourage them, and end with an open-ended question. "
-            "Avoid robotic labels such as 'I understand you are feeling'. "
-            f"Emotion: {emotion}. User message: {safe_text}. Response:"
-        )
-        try:
-            output = generator(prompt, max_new_tokens=96, num_return_sequences=1)
-            generated = output[0]["generated_text"].replace(prompt, "").strip()
-            candidate = generated or _compose_human_response(emotion, safe_text)
-        except Exception:
-            candidate = _compose_human_response(emotion, safe_text)
+        supportive = _apply_emotional_tone(prefix, emotion, context)
+        return {
+            "response_text": supportive,
+            "crisis_detected": False,
+            "severity": context.intensity,
+            "emotional_context": context.as_dict(),
+        }
+
+    prompt = (
+        f"Emotion: {emotion}. User message: {safe_text}. "
+        "Write one brief, empathetic, safe response:"
+    )
+    try:
+        output = generator(prompt, max_new_tokens=48, num_return_sequences=1)
+        generated = output[0]["generated_text"].replace(prompt, "").strip()
+        candidate = generated or prefix
+    except Exception:
+        candidate = prefix
 
     return {
         "response_text": _sanitize_text(candidate),
         "crisis_detected": False,
-        "severity": "low",
+        "severity": context.intensity,
+        "emotional_context": context.as_dict(),
     }
