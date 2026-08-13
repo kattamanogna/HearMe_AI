@@ -93,10 +93,36 @@ curl http://127.0.0.1:8000/api/v1/health
 
 ### Text prediction
 
+The text understanding endpoint returns structured message analysis, including primary and secondary emotion, stress, urgency, intent, topics, people, positive and negative statements, questions, and whether the user appears to want advice or only wants someone to listen.
+
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/predict-text \
   -H "Content-Type: application/json" \
-  -d '{"text":"I feel hopeful today"}'
+  -d '{"text":"I feel overwhelmed because nobody understands me and I want to cry."}'
+```
+
+Example response:
+
+```json
+{
+  "primary_emotion": "sadness",
+  "secondary_emotion": "frustration",
+  "stress": "high",
+  "urgency": "low",
+  "intent": "seek emotional support",
+  "topics": ["loneliness", "communication"],
+  "people": [],
+  "positive_statements": [],
+  "negative_statements": [
+    "I feel overwhelmed because nobody understands me and I want to cry."
+  ],
+  "questions": [],
+  "needs_advice": false,
+  "wants_listening_only": false,
+  "emotion": "sadness",
+  "confidence": 0.98,
+  "probabilities": {"sadness": 0.98}
+}
 ```
 
 ### Audio prediction (file upload)

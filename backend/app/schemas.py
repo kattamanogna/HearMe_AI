@@ -9,10 +9,27 @@ class TextEmotionPredictRequest(BaseModel):
     text: str = Field(..., description="Text content to analyze for emotion.")
 
 
-class TextEmotionPredictResponse(BaseModel):
-    """Emotion prediction result for text input."""
+class MessageUnderstandingResponse(BaseModel):
+    """Structured understanding extracted from a user text message."""
 
-    emotion: str = Field(..., description="Predicted emotion label.")
+    primary_emotion: str = Field(..., description="Most likely emotion in the message.")
+    secondary_emotion: str = Field(..., description="Secondary emotion or neutral when none is evident.")
+    stress: str = Field(..., description="Estimated stress level: low, medium, or high.")
+    urgency: str = Field(..., description="Estimated urgency level: low, medium, or high.")
+    intent: str = Field(..., description="Likely reason the user sent the message.")
+    topics: list[str] = Field(default_factory=list, description="Topics mentioned or implied by the message.")
+    people: list[str] = Field(default_factory=list, description="People mentioned by name or role.")
+    positive_statements: list[str] = Field(default_factory=list, description="Positive statements from the message.")
+    negative_statements: list[str] = Field(default_factory=list, description="Negative statements from the message.")
+    questions: list[str] = Field(default_factory=list, description="Questions asked by the user.")
+    needs_advice: bool = Field(..., description="Whether the user appears to want advice.")
+    wants_listening_only: bool = Field(..., description="Whether the user asks only to be listened to.")
+
+
+class TextEmotionPredictResponse(MessageUnderstandingResponse):
+    """Emotion prediction result plus structured message understanding."""
+
+    emotion: str = Field(..., description="Backward-compatible alias of primary_emotion.")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Prediction confidence.")
     probabilities: dict[str, float] = Field(
         default_factory=dict,

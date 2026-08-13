@@ -50,11 +50,12 @@ def predict_text(payload: TextEmotionPredictRequest) -> TextEmotionPredictRespon
         )
 
     prediction = analyze_text_emotion(payload.text.strip())
-    return TextEmotionPredictResponse(
-        emotion=str(prediction.get("emotion", "neutral")),
-        confidence=float(prediction.get("confidence", 0.0)),
-        probabilities={str(k): float(v) for k, v in dict(prediction.get("probabilities", {})).items()},
-    )
+    prediction["emotion"] = str(prediction.get("emotion", prediction.get("primary_emotion", "neutral")))
+    prediction["confidence"] = float(prediction.get("confidence", 0.0))
+    prediction["probabilities"] = {
+        str(k): float(v) for k, v in dict(prediction.get("probabilities", {})).items()
+    }
+    return TextEmotionPredictResponse.model_validate(prediction)
 
 
 @router.post("/predict-audio", response_model=ModalityPredictResponse)
@@ -100,7 +101,7 @@ async def predict_face(file: UploadFile = File(...)) -> ModalityPredictResponse:
 
 
 @router.post("/analyze")
-async def analyze_multimodal(request: Request) -> dict[str, float | str]:
+async def analyze_multimodal(request: Request) -> dict[str, object]:
     content_type = request.headers.get("content-type", "")
     session_id = "frontend-session"
     text_value = ""
@@ -125,9 +126,9 @@ async def analyze_multimodal(request: Request) -> dict[str, float | str]:
     try:
         result = analyze_text_emotion(text_value)
     except Exception:
-        result = {"emotion": "neutral", "confidence": 0.0}
+        result = analyze_text_emotion("")
 
-    emotion = str(result.get("emotion", "neutral"))
+    emotion = str(result.get("emotion", result.get("primary_emotion", "neutral")))
     confidence = float(result.get("confidence", 0.0))
 
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -140,7 +141,9 @@ async def analyze_multimodal(request: Request) -> dict[str, float | str]:
         timestamp=timestamp,
     )
 
-    return {"emotion": emotion, "confidence": confidence}
+    result["emotion"] = emotion
+    result["confidence"] = confidence
+    return result
 
 
 @router.websocket("/ws/chat")
