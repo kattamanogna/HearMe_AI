@@ -140,27 +140,14 @@ def _predict_emotion_scores(text: str) -> dict[str, float]:
                 "confidence": 0.0,
             }
 
-        top_result = result[0]
-        if isinstance(top_result, list) and top_result:
-            top_result = top_result[0]
+        rows = result[0] if isinstance(result[0], list) else result
+        if not all(isinstance(item, dict) and "label" in item and "score" in item for item in rows):
+            return {"neutral": 0.0}
 
-        if (
-            not isinstance(top_result, dict)
-            or "label" not in top_result
-            or "score" not in top_result
-        ):
-            return {
-                "emotion": "neutral",
-                "confidence": 0.0,
-            }
-
-        emotion = str(top_result["label"]).lower()
-        confidence = float(top_result["score"])
-        print("Text emotion detected:", emotion, confidence)
-        return {
-            "emotion": emotion,
-            "confidence": confidence,
-        }
+        scores = {_normalize_emotion(str(item["label"])): float(item["score"]) for item in rows}
+        top_emotion, confidence = max(scores.items(), key=lambda item: item[1])
+        print("Text emotion detected:", top_emotion, confidence)
+        return scores
     except Exception as exc:  # pragma: no cover - runtime/env dependent.
         logger.exception("Text model inference failed: %s", exc)
         return {}

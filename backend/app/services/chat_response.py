@@ -7,6 +7,7 @@ import re
 from functools import lru_cache
 from typing import Any
 
+from app.services.emotional_intelligence import analyze_emotional_context
 from app.services.session_manager import get_chat_history, get_last_template_index, set_last_template_index
 
 # Lightweight safety list to avoid echoing harmful language in generated replies.
@@ -56,42 +57,94 @@ EMERGENCY_SUPPORT_MESSAGE = (
     "(US/Canada) by calling or texting 988. If you're elsewhere, please contact your local crisis hotline immediately."
 )
 
-_EMOTION_DETAILS: dict[str, dict[str, str]] = {
-    "happy": {
-        "acknowledgement": "I'm glad there's some brightness in this moment.",
-        "validation": "It makes sense to let yourself enjoy something that feels good.",
-        "suggestion": "You might pause and notice what helped create this, or share the good news with someone who'd celebrate with you.",
-        "encouragement": "Hold onto this; positive moments matter, even when they're small.",
-        "question": "What's been the best part of it for you?",
-    },
-    "sad": {
-        "acknowledgement": "I'm really sorry this is weighing on you.",
-        "validation": "Feeling low can be exhausting, and it makes sense that this would hurt.",
-        "suggestion": "If it feels doable, try one gentle next step: drink some water, step outside for a minute, or text someone safe.",
-        "encouragement": "You don't have to solve everything at once; just getting through the next small piece counts.",
-        "question": "What feels heaviest right now?",
-    },
-    "angry": {
-        "acknowledgement": "I can hear how fired up and frustrated this has left you.",
-        "validation": "Anger often shows up when something feels unfair, painful, or out of your control.",
-        "suggestion": "Before responding, it may help to take a short pause, unclench your jaw, and write the first unfiltered version somewhere private.",
-        "encouragement": "You can take care of yourself without letting this moment decide everything for you.",
-        "question": "What part of this crossed the line for you?",
-    },
-    "anxious": {
-        "acknowledgement": "That sounds like a lot for your mind and body to carry.",
-        "validation": "Anxiety can feel so convincing when you're trying to handle uncertainty or pressure.",
-        "suggestion": "Try planting both feet on the floor and naming five things you can see, then pick just one next task that is small enough to start.",
-        "encouragement": "You can move through this one breath and one choice at a time.",
-        "question": "What's the worry that keeps looping the loudest?",
-    },
-    "neutral": {
-        "acknowledgement": "I'm here with you.",
-        "validation": "Whatever you're noticing is worth taking seriously, even if it feels hard to name yet.",
-        "suggestion": "You could start by checking in with your body, your energy, or the one thing you most need today.",
-        "encouragement": "We can take this at your pace.",
-        "question": "What would feel helpful to talk through first?",
-    },
+_RESPONSE_STYLES: dict[str, list[dict[str, str]]] = {
+    "happy": [
+        {
+            "acknowledgement": "That sounds like a bright spot worth savoring.",
+            "validation": "Good moments can deserve room too, especially when life has been demanding.",
+            "suggestion": "Maybe take a small snapshot of what made this feel good so you can return to it later.",
+            "encouragement": "Let yourself enjoy it without needing to shrink it down.",
+            "question": "What part of this feels most meaningful right now?",
+        },
+        {
+            "acknowledgement": "It's lovely to hear a bit of lightness coming through.",
+            "validation": "Feeling good can be grounding, and it is okay to lean into that.",
+            "suggestion": "You could share it with someone kind, or simply pause and let the moment land.",
+            "encouragement": "These wins count, even the quiet ones.",
+            "question": "What helped bring this on?",
+        },
+    ],
+    "sad": [
+        {
+            "acknowledgement": "I'm really sorry this is weighing on you.",
+            "validation": "Feeling low can be exhausting, and it makes sense that this would hurt.",
+            "suggestion": "If it feels doable, try one gentle next step: drink some water, step outside for a minute, or text someone safe.",
+            "encouragement": "You don't have to solve everything at once; just getting through the next small piece counts.",
+            "question": "What feels heaviest right now?",
+        },
+        {
+            "acknowledgement": "That sounds tender and heavy to carry.",
+            "validation": "Anyone could feel worn down when something matters this much.",
+            "suggestion": "For the next few minutes, it may help to lower the pressure and do one caring thing for your body.",
+            "encouragement": "Small care still matters on hard days.",
+            "question": "Would talking through what happened help a little?",
+        },
+        {
+            "acknowledgement": "Oof, that sounds painful.",
+            "validation": "It is reasonable that your heart feels bruised by this.",
+            "suggestion": "Try naming the feeling without arguing with it, then choose the smallest next step that feels manageable.",
+            "encouragement": "You can move slowly here; there is no need to force yourself to be okay immediately.",
+            "question": "What would feel like a little relief tonight?",
+        },
+    ],
+    "angry": [
+        {
+            "acknowledgement": "I can hear how fired up and frustrated this has left you.",
+            "validation": "Anger often shows up when something feels unfair, painful, or out of your control.",
+            "suggestion": "Before responding, it may help to take a short pause, unclench your jaw, and write the first unfiltered version somewhere private.",
+            "encouragement": "You can take care of yourself without letting this moment decide everything for you.",
+            "question": "What part of this crossed the line for you?",
+        },
+        {
+            "acknowledgement": "That would leave a lot of people feeling heated.",
+            "validation": "Your reaction may be pointing to a boundary, a hurt, or something that needs to be addressed.",
+            "suggestion": "Give yourself a little space before you choose what to say or do next.",
+            "encouragement": "You can be firm and still protect your peace.",
+            "question": "What outcome would feel fair from here?",
+        },
+    ],
+    "anxious": [
+        {
+            "acknowledgement": "That sounds like a lot for your mind and body to carry.",
+            "validation": "Anxiety can feel so convincing when you're trying to handle uncertainty or pressure.",
+            "suggestion": "Try planting both feet on the floor and naming five things you can see, then pick just one next task that is small enough to start.",
+            "encouragement": "You can move through this one breath and one choice at a time.",
+            "question": "What's the worry that keeps looping the loudest?",
+        },
+        {
+            "acknowledgement": "Your nervous system sounds really activated right now.",
+            "validation": "When things feel uncertain, the mind can race ahead trying to protect you.",
+            "suggestion": "See if you can slow the moment down: breathe out longer than you breathe in, then name what is actually in front of you.",
+            "encouragement": "You do not need the whole answer before taking the next steady step.",
+            "question": "What is one thing you know for sure in this moment?",
+        },
+    ],
+    "neutral": [
+        {
+            "acknowledgement": "We can take this at an easy pace.",
+            "validation": "Whatever you're noticing is worth taking seriously, even if it feels hard to name yet.",
+            "suggestion": "You could start by checking in with your body, your energy, or the one thing you most need today.",
+            "encouragement": "There is no wrong place to begin.",
+            "question": "What would feel helpful to talk through first?",
+        },
+        {
+            "acknowledgement": "Thanks for putting words to what is going on.",
+            "validation": "Sometimes naming the moment is enough of a first step.",
+            "suggestion": "If you want, choose one thread and we can gently untangle it together.",
+            "encouragement": "No pressure to have it all figured out.",
+            "question": "Where would you like to start?",
+        },
+    ],
 }
 
 _EMOTION_ALIASES = {
@@ -168,21 +221,34 @@ def generate_mental_health_response(
     emotion: str,
     confidence: float | None = None,
     conversation_history: str | None = None,
+    current_text: str = "",
+    *,
+    session_id: str = "default",
 ) -> str:
     """Create a concise, empathetic, safety-aware message for a detected emotion."""
 
     normalized = _normalized_emotion(emotion)
-    templates = _EMOTION_TEMPLATES.get(normalized, _EMOTION_TEMPLATES["neutral"])
-    base = templates[0]
+    styles = _RESPONSE_STYLES.get(normalized, _RESPONSE_STYLES["neutral"])
+    last_index = get_last_template_index(session_id, normalized)
+    style_index = 0 if last_index is None else (last_index + 1) % len(styles)
+    set_last_template_index(session_id, normalized, style_index)
 
+    style = styles[style_index].copy()
     if normalized == "sad" and confidence is not None and confidence >= 0.8:
-        base = (
-            "I'm really sorry you're feeling this way. You don't have to carry this alone, "
-            "and we can move through this one small step at a time."
-        )
+        style["acknowledgement"] = "This sounds deeply painful, and you deserve gentleness right now."
+        style["encouragement"] = "You do not have to carry the whole day at once."
 
-    memory_prefix = f"{conversation_history} " if conversation_history else ""
-    return f"{memory_prefix}{base} {_build_supportive_follow_up(normalized)}"
+    parts: list[str] = []
+    if current_text and conversation_history:
+        parts.append(conversation_history.strip())
+    elif conversation_history:
+        parts.append(_short_reflection(conversation_history))
+    response_parts = [style["acknowledgement"], style["validation"]]
+    if current_text:
+        response_parts.append(_short_reflection(current_text))
+    response_parts.extend([style["suggestion"], style["encouragement"], style["question"]])
+    parts.extend(response_parts)
+    return " ".join(part for part in parts if part)
 
 
 @lru_cache(maxsize=1)
@@ -220,11 +286,7 @@ def detect_crisis_language(text: str) -> bool:
 
 def _normalized_emotion(emotion: str) -> str:
     value = emotion.strip().lower() if emotion else "neutral"
-    if value in {"fearful", "fear"}:
-        return "anxious"
-    if value == "sadness":
-        return "sad"
-    return value
+    return _EMOTION_ALIASES.get(value, value)
 
 
 def _short_reflection(text: str) -> str:
@@ -238,61 +300,55 @@ def _short_reflection(text: str) -> str:
     return f"From what you shared, {trimmed.lower()}."
 
 
-def _compose_human_response(emotion: str, text: str) -> str:
-    details = _EMOTION_DETAILS.get(_normalized_emotion(emotion), _EMOTION_DETAILS["neutral"])
-    reflection = _short_reflection(text)
-    return " ".join(
-        [
-            details["acknowledgement"],
-            details["validation"],
-            reflection,
-            details["suggestion"],
-            details["encouragement"],
-            details["question"],
-        ]
+def _fallback_response(emotion: str, text: str, memory_context: str, session_id: str) -> str:
+    return generate_mental_health_response(
+        emotion,
+        conversation_history=memory_context,
+        current_text=text,
+        session_id=session_id,
     )
 
 
 def generate_response(
     session_id: str, emotion: str, text: str
 ) -> dict[str, str | bool | dict[str, bool | str | list[str]]]:
-    safe_text = _sanitize_text(text)
-    memory_context = _build_memory_context(get_chat_history(session_id))
+    history = get_chat_history(session_id)
+    recent_user_messages = [str(item.get("text", "")) for item in history if item.get("text")]
+    context = analyze_emotional_context(text, primary_emotion=emotion, recent_user_messages=recent_user_messages)
+    memory_context = _build_memory_context(history)
 
     if detect_crisis_language(text):
         return {
             "response_text": EMERGENCY_SUPPORT_MESSAGE,
             "crisis_detected": True,
             "severity": "high",
-            "emotional_context": context.as_dict(),
         }
 
     safe_text = _sanitize_text(text)
+    fallback = _fallback_response(emotion, safe_text, memory_context, session_id)
     generator = _load_hf_generator()
     if generator is None:
-        supportive = generate_mental_health_response(emotion, conversation_history=memory_context)
         return {
-            "response_text": supportive,
+            "response_text": fallback,
             "crisis_detected": False,
             "severity": context.intensity,
-            "emotional_context": context.as_dict(),
         }
 
     history_prompt = f"Conversation memory: {memory_context}. " if memory_context else ""
     prompt = (
         f"{history_prompt}Emotion: {emotion}. User message: {safe_text}. "
-        "Write one brief, empathetic, safe response that uses relevant prior context:"
+        "Write one brief, warm, natural, calm, non-judgmental response. "
+        "Avoid stock acknowledgement phrases and vary the wording:"
     )
     try:
         output = generator(prompt, max_new_tokens=48, num_return_sequences=1)
         generated = output[0]["generated_text"].replace(prompt, "").strip()
-        candidate = generated or f"{memory_context} {prefix}".strip()
+        candidate = generated or fallback
     except Exception:
-        candidate = f"{memory_context} {prefix}".strip()
+        candidate = fallback
 
     return {
         "response_text": _sanitize_text(candidate),
         "crisis_detected": False,
         "severity": context.intensity,
-        "emotional_context": context.as_dict(),
     }
