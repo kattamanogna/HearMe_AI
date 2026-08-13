@@ -130,6 +130,8 @@ async def analyze_multimodal(request: Request) -> dict[str, float | str]:
     emotion = str(result.get("emotion", "neutral"))
     confidence = float(result.get("confidence", 0.0))
 
+    generated = generate_response(session_id, emotion, text_value)
+
     timestamp = datetime.now(timezone.utc).isoformat()
     store_interaction(
         session_id,
@@ -138,9 +140,16 @@ async def analyze_multimodal(request: Request) -> dict[str, float | str]:
         confidence=confidence,
         route="/api/v1/analyze",
         timestamp=timestamp,
+        response_text=str(generated["response_text"]),
     )
 
-    return {"emotion": emotion, "confidence": confidence}
+    return {
+        "emotion": emotion,
+        "confidence": confidence,
+        "response_text": str(generated["response_text"]),
+        "crisis_detected": bool(generated["crisis_detected"]),
+        "severity": str(generated["severity"]),
+    }
 
 
 @router.websocket("/ws/chat")
@@ -163,6 +172,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
             text_prediction = analyze_text_emotion(text_value)
             emotion = str(text_prediction.get("emotion", "neutral"))
 
+            generated = generate_response(session_id, emotion, text_value)
+
             timestamp = datetime.now(timezone.utc).isoformat()
             store_interaction(
                 session_id,
@@ -171,9 +182,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 confidence=float(text_prediction.get("confidence", 0.0)),
                 route="/api/v1/ws/chat",
                 timestamp=timestamp,
+                response_text=str(generated["response_text"]),
             )
-
-            generated = generate_response(session_id, emotion, text_value)
             chunks = _stream_chunks(str(generated["response_text"]))
             for index, chunk in enumerate(chunks):
                 stream_chunk = ChatStreamChunk(

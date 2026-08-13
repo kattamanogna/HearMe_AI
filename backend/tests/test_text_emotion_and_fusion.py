@@ -36,3 +36,48 @@ def test_fusion_defaults_to_neutral_only_if_all_fail():
         "confidence": 0.0,
         "probabilities": {"neutral": 0.0},
     }
+
+from datetime import datetime, timezone
+
+from app.services.chat_response import generate_response
+from app.services.session_manager import get_chat_history, store_interaction
+
+
+def test_chat_response_uses_recent_conversation_memory():
+    session_id = "memory-test-session"
+    first_response = "We focused on one grounding step."
+    store_interaction(
+        session_id,
+        user_text="My name is Maya and I am anxious about work.",
+        emotion="anxious",
+        confidence=0.91,
+        route="test",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        response_text=first_response,
+    )
+
+    response = generate_response(session_id, "sad", "It still feels hard today.")
+
+    assert "Maya" in str(response["response_text"])
+    assert "work stress" in str(response["response_text"])
+    assert "Earlier emotions included anxious" in str(response["response_text"])
+
+
+def test_session_memory_keeps_only_last_10_exchanges():
+    session_id = "memory-limit-session"
+    for index in range(12):
+        store_interaction(
+            session_id,
+            user_text=f"Message {index}",
+            emotion="neutral",
+            confidence=0.5,
+            route="test",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            response_text=f"Advice {index}",
+        )
+
+    history = get_chat_history(session_id)
+
+    assert len(history) == 10
+    assert history[0]["text"] == "Message 2"
+    assert history[-1]["response_text"] == "Advice 11"

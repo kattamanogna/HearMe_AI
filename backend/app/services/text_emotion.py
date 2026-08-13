@@ -54,6 +54,8 @@ def analyze_text_emotion(text: str) -> dict[str, Any]:
             }
 
         top_result = result[0]
+        if isinstance(top_result, list) and top_result:
+            top_result = top_result[0]
 
         if not isinstance(top_result, dict) or "label" not in top_result or "score" not in top_result:
             return {

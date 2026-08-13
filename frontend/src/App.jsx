@@ -71,6 +71,11 @@ export default function App() {
   };
 
   const addEmotionBotMessage = (data) => {
+    if (data?.response_text) {
+      addBotMessage(data.response_text);
+      return;
+    }
+
     if (data?.emotion) {
       addBotMessage(`I understand you're feeling ${data.emotion}. I'm here to listen.`);
       return;
