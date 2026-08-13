@@ -38,17 +38,63 @@ _NAME_PATTERNS = [
 _PROBLEM_KEYWORDS = {
     "work": "work stress",
     "job": "job stress",
+    "boss": "work stress",
+    "meeting": "meeting pressure",
+    "deadline": "deadline pressure",
     "school": "school pressure",
+    "class": "class pressure",
     "exam": "exam pressure",
+    "test": "test pressure",
+    "homework": "school pressure",
     "relationship": "relationship strain",
+    "partner": "relationship strain",
     "friend": "friendship concern",
     "family": "family concern",
+    "parent": "family concern",
     "sleep": "sleep trouble",
     "anxious": "anxiety",
     "anxiety": "anxiety",
     "sad": "sadness",
     "angry": "anger",
     "lonely": "loneliness",
+}
+
+_CONTEXTUAL_ACTIVITY_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("exam", "test", "homework", "assignment", "class", "school"),
+        "write the next school task on paper and spend five focused minutes on only that piece",
+    ),
+    (
+        ("work", "job", "boss", "meeting", "deadline", "project"),
+        "list the one work item that truly needs attention next, then take a two-minute breathing reset before starting it",
+    ),
+    (
+        ("friend", "partner", "relationship"),
+        "draft one honest sentence you might say to them, without sending it until you feel steadier",
+    ),
+    (
+        ("family", "parent", "sibling", "home"),
+        "step into a quieter spot and write what you need from the family situation before responding",
+    ),
+    (
+        ("sleep", "tired", "exhausted", "bed"),
+        "dim one light, put your phone down for five minutes, and let your body settle before deciding anything else",
+    ),
+    (
+        ("lonely", "alone", "isolated"),
+        "send a low-pressure check-in to one safe person, even if it is just 'could use a little company today'",
+    ),
+)
+
+_EMOTION_ACTIVITY_FALLBACKS = {
+    "sad": "write three lines about what hurts most, then consider sharing one line with someone you trust",
+    "anxious": (
+        "do a 5-4-3-2-1 grounding exercise, then break the next task into a step small enough "
+        "to finish in ten minutes"
+    ),
+    "angry": "take a brisk two-minute walk or stretch, then write the unsent version of what you want to say",
+    "happy": "capture what made this moment work so you can repeat one part of it later",
+    "neutral": "choose one concrete thread from your message and take a tiny action on that first",
 }
 
 EMERGENCY_SUPPORT_MESSAGE = (
@@ -246,7 +292,10 @@ def generate_mental_health_response(
     response_parts = [style["acknowledgement"], style["validation"]]
     if current_text:
         response_parts.append(_short_reflection(current_text))
-    response_parts.extend([style["suggestion"], style["encouragement"], style["question"]])
+    coping_suggestion = _personalized_coping_suggestion(normalized, current_text)
+    response_parts.extend(
+        [coping_suggestion or style["suggestion"], style["encouragement"], style["question"]]
+    )
     parts.extend(response_parts)
     return " ".join(part for part in parts if part)
 
@@ -287,6 +336,29 @@ def detect_crisis_language(text: str) -> bool:
 def _normalized_emotion(emotion: str) -> str:
     value = emotion.strip().lower() if emotion else "neutral"
     return _EMOTION_ALIASES.get(value, value)
+
+
+def _personalized_coping_suggestion(emotion: str, text: str) -> str:
+    """Recommend a concrete coping activity that fits the emotion and message context."""
+
+    lowered = text.lower()
+    activity = ""
+    for keywords, candidate in _CONTEXTUAL_ACTIVITY_KEYWORDS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", lowered) for keyword in keywords):
+            activity = candidate
+            break
+
+    if not activity:
+        activity = _EMOTION_ACTIVITY_FALLBACKS.get(emotion, _EMOTION_ACTIVITY_FALLBACKS["neutral"])
+
+    lead_ins = {
+        "sad": "Because this sounds sad and tied to what you shared, try this specific next step:",
+        "anxious": "Because this sounds anxious, give your body and attention a concrete anchor:",
+        "angry": "Because this sounds heated, choose an activity that creates space before action:",
+        "happy": "Because this sounds like something worth protecting, try this:",
+        "neutral": "For this specific situation, try one practical next step:",
+    }
+    return f"{lead_ins.get(emotion, lead_ins['neutral'])} {activity}."
 
 
 def _short_reflection(text: str) -> str:
