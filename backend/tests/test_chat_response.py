@@ -6,11 +6,11 @@ def test_generate_response_follows_compassionate_structure(monkeypatch):
 
     result = generate_response("session-1", "sadness", "I failed my exam and feel like I let everyone down")
 
-    assert result == {
-        "response_text": result["response_text"],
-        "crisis_detected": False,
-        "severity": "low",
-    }
+    assert result["response_text"]
+    assert result["crisis_detected"] is False
+    assert result["severity"] == "low"
+    assert result["emotional_context"]["primary_emotion"] == "sad"
+    assert result["emotional_context"]["severity"] == "low"
     response = str(result["response_text"])
     assert response.startswith("I'm really sorry this is weighing on you.")
     assert "Feeling low can be exhausting" in response

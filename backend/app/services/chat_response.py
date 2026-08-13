@@ -124,7 +124,7 @@ EMERGENCY_SUPPORT_MESSAGE = (
     "you slow your breathing. Can you contact one trusted person to stay with you or help you get support right now?"
 )
 
-_RESPONSE_STYLES: dict[str, list[dict[str, str]]] = {
+_EMOTION_DETAILS: dict[str, list[dict[str, str]]] = {
     "happy": [
         {
             "acknowledgement": "That sounds like a bright spot worth savoring.",
@@ -295,7 +295,7 @@ def generate_mental_health_response(
     """Create a concise, empathetic, safety-aware message for a detected emotion."""
 
     normalized = _normalized_emotion(emotion)
-    styles = _RESPONSE_STYLES.get(normalized, _RESPONSE_STYLES["neutral"])
+    styles = _EMOTION_DETAILS.get(normalized, _EMOTION_DETAILS["neutral"])
     last_index = get_last_template_index(session_id, normalized)
     style_index = 0 if last_index is None else (last_index + 1) % len(styles)
     set_last_template_index(session_id, normalized, style_index)
@@ -311,6 +311,9 @@ def generate_mental_health_response(
     elif conversation_history:
         parts.append(_short_reflection(conversation_history))
     response_parts = [style["acknowledgement"], style["validation"]]
+    contextual_note = _emotional_context_note(_analyze_current_context(current_text, normalized)) if current_text else ""
+    if contextual_note:
+        response_parts.append(contextual_note)
     if current_text:
         response_parts.append(_short_reflection(current_text))
     coping_suggestion = _personalized_coping_suggestion(normalized, current_text)
@@ -393,6 +396,39 @@ def _short_reflection(text: str) -> str:
     return f"From what you shared, {trimmed.lower()}."
 
 
+
+def _analyze_current_context(text: str, emotion: str):
+    """Analyze the current turn for tone adjustments without relying on globals."""
+
+    return analyze_emotional_context(text, primary_emotion=emotion)
+
+
+def _emotional_context_note(context) -> str:
+    """Add a brief humanizing note for nuanced emotional signals."""
+
+    notes: list[str] = []
+    if context.confused:
+        notes.append("If part of this feels tangled or unclear, we can slow it down together.")
+    if context.sarcastic:
+        notes.append("I also hear a bit of weary frustration underneath the words.")
+    if context.hopeless:
+        notes.append("When hope feels far away, the goal can simply be getting through this next moment safely.")
+    if context.repeated_negative_thoughts:
+        notes.append("Since this pattern has been showing up repeatedly, it may help to treat the thought as a signal rather than a verdict.")
+    if context.mixed_emotions:
+        notes.append(f"It makes sense if this feels mixed: {', '.join(context.mixed_emotions)} can overlap.")
+    return " ".join(notes)
+
+
+def _emotional_context_payload(context, emotion: str, *, crisis_detected: bool = False, severity: str | None = None) -> dict[str, bool | str | list[str]]:
+    """Return stable emotional-context data for API consumers."""
+
+    payload = context.as_dict()
+    payload["primary_emotion"] = _normalized_emotion(emotion)
+    payload["severity"] = severity or str(payload.get("intensity", "low"))
+    payload["crisis_detected"] = crisis_detected
+    return payload
+
 def _fallback_response(emotion: str, text: str, memory_context: str, session_id: str) -> str:
     return generate_mental_health_response(
         emotion,
@@ -415,6 +451,7 @@ def generate_response(
             "response_text": EMERGENCY_SUPPORT_MESSAGE,
             "crisis_detected": True,
             "severity": "high",
+            "emotional_context": _emotional_context_payload(context, emotion, crisis_detected=True, severity="high"),
         }
 
     safe_text = _sanitize_text(text)
@@ -425,6 +462,7 @@ def generate_response(
             "response_text": fallback,
             "crisis_detected": False,
             "severity": context.intensity,
+            "emotional_context": _emotional_context_payload(context, emotion),
         }
 
     history_prompt = f"Conversation memory: {memory_context}. " if memory_context else ""
@@ -444,4 +482,5 @@ def generate_response(
         "response_text": _sanitize_text(candidate),
         "crisis_detected": False,
         "severity": context.intensity,
+        "emotional_context": _emotional_context_payload(context, emotion),
     }
