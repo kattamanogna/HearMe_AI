@@ -9,8 +9,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MAX_USER_MESSAGES = 5
-MAX_EMOTION_HISTORY = 30
+MAX_USER_MESSAGES = 10
+MAX_EMOTION_HISTORY = 10
 
 
 @dataclass
@@ -46,6 +46,7 @@ def store_interaction(
     confidence: float,
     route: str,
     timestamp: str,
+    response_text: str | None = None,
 ) -> SessionState:
     """Store user message and emotion metadata for a session."""
 
@@ -55,15 +56,16 @@ def store_interaction(
         state.user_messages.append(user_text)
         state.emotion_history.append(emotion)
         state.confidence_history.append(float(confidence))
-        state.interaction_log.append(
-            {
-                "timestamp": timestamp,
-                "route": route,
-                "text": user_text,
-                "fused_emotion": emotion,
-                "confidence": f"{float(confidence):.4f}",
-            }
-        )
+        interaction = {
+            "timestamp": timestamp,
+            "route": route,
+            "text": user_text,
+            "fused_emotion": emotion,
+            "confidence": f"{float(confidence):.4f}",
+        }
+        if response_text is not None:
+            interaction["response_text"] = response_text
+        state.interaction_log.append(interaction)
 
         logger.info("Session %s emotion history: %s", normalized, list(state.emotion_history))
         logger.info("Session %s confidence trend: %s", normalized, list(state.confidence_history))
