@@ -64,6 +64,38 @@ def test_invalid_model_output_has_only_numeric_fallback_scores(monkeypatch):
     assert all(isinstance(score, float) for score in result["probabilities"].values())
 
 
+def test_nested_pipeline_output_uses_numeric_scores_and_highest_emotion(monkeypatch):
+    def fake_classifier(_text):
+        return [[[
+            {"label": "anger", "score": "0.000708"},
+            {"label": "disgust", "score": 0.000347},
+            {"label": "fear", "score": 0.000623},
+            {"label": "joy", "score": 0.002815},
+            {"label": "neutral", "score": 0.001480},
+            {"label": "sadness", "score": 0.990673},
+            {"label": "surprise", "score": 0.003355},
+            {"label": "invalid", "score": "not a number"},
+        ]]]
+
+    monkeypatch.setattr(text_emotion, "_get_text_classifier", lambda: fake_classifier)
+
+    result = text_emotion.analyze_text_emotion("Today has been difficult.")
+
+    assert result["primary_emotion"] == "sadness"
+    assert result["emotion"] == "sadness"
+    assert result["confidence"] == 0.990673
+    assert result["probabilities"] == {
+        "anger": 0.000708,
+        "disgust": 0.000347,
+        "fear": 0.000623,
+        "joy": 0.002815,
+        "neutral": 0.001480,
+        "sadness": 0.990673,
+        "surprise": 0.003355,
+    }
+    assert all(isinstance(score, float) for score in result["probabilities"].values())
+
+
 def test_rank_emotions_ignores_invalid_values():
     primary, secondary, confidence = text_emotion._rank_emotions(
         {"sadness": "not a score", "fear": 0.2, "anger": float("nan")},
