@@ -140,17 +140,13 @@ def _predict_emotion_scores(text: str) -> dict[str, float]:
             logger.warning("Text emotion model returned an empty or invalid response: %r", result)
             return {"neutral": 0.0}
 
-        rows = result[0] if isinstance(result[0], list) else result
-        if not isinstance(rows, list):
-            logger.warning("Text emotion model returned non-list score rows: %r", rows)
+        rows = _flatten_score_rows(result)
+        if not rows:
+            logger.warning("Text emotion model returned no score rows: %r", result)
             return {"neutral": 0.0}
 
         scores: dict[str, float] = {}
         for item in rows:
-            if not isinstance(item, dict):
-                logger.warning("Ignoring non-dictionary text emotion score: %r", item)
-                continue
-
             label = item.get("label")
             score = _coerce_score(item.get("score"))
             if not isinstance(label, str) or not label.strip() or score is None:
@@ -167,6 +163,30 @@ def _predict_emotion_scores(text: str) -> dict[str, float]:
     except Exception as exc:  # pragma: no cover - runtime/env dependent.
         logger.exception("Text model inference failed: %s", exc)
         return {"neutral": 0.0}
+
+
+def _flatten_score_rows(result: Any) -> list[dict[str, Any]]:
+    """Extract score dictionaries from flat or nested pipeline output lists.
+
+    Hugging Face pipelines commonly return either ``[{...}]`` or ``[[{...}]]``
+    depending on the Transformers version and how the input was batched.  Walk
+    all nested lists so either shape produces the same score mapping.
+    """
+
+    if not isinstance(result, list):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    pending: list[Any] = list(result)
+    while pending:
+        item = pending.pop(0)
+        if isinstance(item, dict):
+            rows.append(item)
+        elif isinstance(item, list):
+            pending[0:0] = item
+        else:
+            logger.warning("Ignoring non-dictionary text emotion score: %r", item)
+    return rows
 
 
 def _rank_emotions(scores: dict[str, float], text: str) -> tuple[str, str, float]:
