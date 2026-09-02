@@ -1,3 +1,5 @@
+import pytest
+
 from app.services import text_emotion
 from app.services.chat_response import generate_response
 from app.services.emotional_intelligence import analyze_emotional_context
@@ -49,6 +51,56 @@ def test_message_understanding_detects_advice_questions_and_listening_only(monke
     assert listening["needs_advice"] is False
     assert listening["wants_listening_only"] is True
     assert listening["intent"] == "vent or be heard"
+
+
+def test_invalid_model_output_has_only_numeric_fallback_scores(monkeypatch):
+    monkeypatch.setattr(text_emotion, "_get_text_classifier", lambda: lambda _text: [])
+
+    result = text_emotion.analyze_text_emotion("I am feeling sad and overwhelmed")
+
+    assert result["emotion"] == "neutral"
+    assert result["confidence"] == 0.0
+    assert result["probabilities"] == {"neutral": 0.0}
+    assert all(isinstance(score, float) for score in result["probabilities"].values())
+
+
+def test_rank_emotions_ignores_invalid_values():
+    primary, secondary, confidence = text_emotion._rank_emotions(
+        {"sadness": "not a score", "fear": 0.2, "anger": float("nan")},
+        "I am feeling sad and overwhelmed",
+    )
+
+    assert (primary, secondary, confidence) == ("fear", "sadness", 0.2)
+
+
+def test_predict_text_endpoint_returns_json_for_sad_and_overwhelmed_input(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    def fake_classifier(_text):
+        return [[
+            {"label": "anger", "score": 0.013245883397758007},
+            {"label": "fear", "score": 0.1705426126718521},
+            {"label": "sadness", "score": 0.01749451644718647},
+            {"label": "surprise", "score": 0.7880874872207642},
+        ]]
+
+    monkeypatch.setattr(text_emotion, "_get_text_classifier", lambda: fake_classifier)
+
+    response = TestClient(create_app()).post(
+        "/api/v1/predict-text",
+        json={"text": "i am feeling sad and overwhelmed"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["emotion"] == "surprise"
+    assert body["primary_emotion"] == "surprise"
+    assert body["secondary_emotion"] == "sadness"
+    assert body["confidence"] == 0.7880874872207642
+    assert all(isinstance(score, float) for score in body["probabilities"].values())
 
 
 def test_fusion_uses_text_when_other_models_fail():

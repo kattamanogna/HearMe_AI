@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 import logging
+import math
 import re
 from typing import Any
 
@@ -129,32 +130,58 @@ def _empty_analysis() -> dict[str, Any]:
 
 
 def _predict_emotion_scores(text: str) -> dict[str, float]:
+    """Return a numeric probability mapping from the model's raw response."""
+
     try:
         classifier = _get_text_classifier()
         result = classifier(text.strip())
-        print("Text model raw output:", result)
 
         if not isinstance(result, list) or not result:
-            return {
-                "emotion": "neutral",
-                "confidence": 0.0,
-            }
-
-        rows = result[0] if isinstance(result[0], list) else result
-        if not all(isinstance(item, dict) and "label" in item and "score" in item for item in rows):
+            logger.warning("Text emotion model returned an empty or invalid response: %r", result)
             return {"neutral": 0.0}
 
-        scores = {_normalize_emotion(str(item["label"])): float(item["score"]) for item in rows}
-        top_emotion, confidence = max(scores.items(), key=lambda item: item[1])
-        print("Text emotion detected:", top_emotion, confidence)
+        rows = result[0] if isinstance(result[0], list) else result
+        if not isinstance(rows, list):
+            logger.warning("Text emotion model returned non-list score rows: %r", rows)
+            return {"neutral": 0.0}
+
+        scores: dict[str, float] = {}
+        for item in rows:
+            if not isinstance(item, dict):
+                logger.warning("Ignoring non-dictionary text emotion score: %r", item)
+                continue
+
+            label = item.get("label")
+            score = _coerce_score(item.get("score"))
+            if not isinstance(label, str) or not label.strip() or score is None:
+                logger.warning("Ignoring invalid text emotion score item: %r", item)
+                continue
+
+            scores[_normalize_emotion(label)] = score
+
+        if not scores:
+            logger.warning("Text emotion model returned no usable numeric scores")
+            return {"neutral": 0.0}
+
         return scores
     except Exception as exc:  # pragma: no cover - runtime/env dependent.
         logger.exception("Text model inference failed: %s", exc)
-        return {}
+        return {"neutral": 0.0}
 
 
 def _rank_emotions(scores: dict[str, float], text: str) -> tuple[str, str, float]:
-    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    """Rank valid numeric emotion scores, falling back safely to neutral."""
+
+    if not isinstance(scores, dict):
+        logger.warning("Cannot rank non-dictionary text emotion scores: %r", scores)
+        scores = {}
+
+    valid_scores = {
+        str(emotion): score
+        for emotion, value in scores.items()
+        if (score := _coerce_score(value)) is not None
+    }
+    ranked = sorted(valid_scores.items(), key=lambda item: item[1], reverse=True)
     primary = ranked[0][0] if ranked else "neutral"
     confidence = float(ranked[0][1]) if ranked else 0.0
     secondary = ranked[1][0] if len(ranked) > 1 else "neutral"
@@ -164,6 +191,18 @@ def _rank_emotions(scores: dict[str, float], text: str) -> tuple[str, str, float
             secondary = emotion
             break
     return primary, secondary, confidence
+
+
+def _coerce_score(value: Any) -> float | None:
+    """Convert a model score to a finite float, rejecting invalid values."""
+
+    if isinstance(value, bool):
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    return score if math.isfinite(score) else None
 
 
 def _normalize_emotion(label: str) -> str:
